@@ -53,6 +53,10 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
 
   late final TextEditingController _promptController;
   late final TextEditingController _systemInstructionController;
+  late final TextEditingController _maxOutputTokensController;
+  late final TextEditingController _seedController;
+  late final TextEditingController _topKController;
+  late final TextEditingController _candidateCountController;
 
   late final StreamSubscription<dynamic> _downloadSubscription;
   late final StreamSubscription<dynamic> _promptSubscription;
@@ -61,6 +65,8 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
   bool _isStartingDownload = false;
   bool _isRunningPrompt = false;
   bool _systemInstructionAvailable = false;
+  double _temperature = 0.0;
+  String _modelReleaseStage = 'STABLE';
 
   String _status = 'NOT CHECKED';
   String _description =
@@ -68,8 +74,16 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
 
   String _promptStatus = 'Not run';
   String _promptOutput = '';
+  List<Map<String, dynamic>> _candidates = <Map<String, dynamic>>[];
   String? _submittedPrompt;
   String? _submittedSystemInstruction;
+  double? _submittedTemperature;
+  int? _submittedMaxOutputTokens;
+  int? _submittedSeed;
+  int? _submittedTopK;
+  int? _submittedCandidateCount;
+  String? _finishReason;
+  int? _finishReasonCode;
 
   String? _deviceInformation;
   String? _systemInstructionDescription;
@@ -81,6 +95,8 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
   int? _downloadedBytes;
   int? _totalBytes;
   int? _elapsedMilliseconds;
+  int? _requestTokens;
+  int? _tokenLimit;
 
   @override
   void initState() {
@@ -90,6 +106,10 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
     _systemInstructionController = TextEditingController(
       text: _defaultSystemInstruction,
     );
+    _maxOutputTokensController = TextEditingController(text: '4096');
+    _seedController = TextEditingController(text: '0');
+    _topKController = TextEditingController(text: '3');
+    _candidateCountController = TextEditingController(text: '1');
 
     _downloadSubscription = _downloadChannel.receiveBroadcastStream().listen(
       _handleDownloadEvent,
@@ -108,6 +128,10 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
     _promptSubscription.cancel();
     _promptController.dispose();
     _systemInstructionController.dispose();
+    _maxOutputTokensController.dispose();
+    _seedController.dispose();
+    _topKController.dispose();
+    _candidateCountController.dispose();
     super.dispose();
   }
 
@@ -180,6 +204,46 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
           _isChecking = false;
         });
       }
+    }
+  }
+
+  Future<void> _setModelReleaseStage(String releaseStage) async {
+    setState(() {
+      _modelReleaseStage = releaseStage;
+      _status = 'NOT CHECKED';
+      _description = 'Check availability for the selected model stage.';
+      _systemInstructionAvailable = false;
+      _systemInstructionDescription = null;
+      _systemInstructionError = null;
+      _errorDetails = null;
+    });
+
+    try {
+      final result = await _nativeChannel.invokeMapMethod<String, dynamic>(
+        'setModelReleaseStage',
+        <String, dynamic>{'modelReleaseStage': releaseStage},
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      if (result?['modelReleaseStage']?.toString() != releaseStage) {
+        setState(() {
+          _status = 'ERROR';
+          _description = 'Kotlin did not select the requested model stage.';
+        });
+      }
+    } on PlatformException catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _status = 'ERROR';
+        _description = error.message ?? 'The model stage could not be changed.';
+        _errorDetails = 'Platform error: ${error.code}';
+      });
     }
   }
 
@@ -284,26 +348,155 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
   Future<void> _runPrompt() async {
     final prompt = _promptController.text;
     final systemInstruction = _systemInstructionController.text;
+    final maxOutputTokens = int.tryParse(_maxOutputTokensController.text);
+    final seed = int.tryParse(_seedController.text);
+    final topK = int.tryParse(_topKController.text);
+    final candidateCount = int.tryParse(_candidateCountController.text);
     final systemInstructionToSend = systemInstruction.trim().isEmpty
         ? null
         : systemInstruction;
+
+    if (maxOutputTokens == null ||
+        maxOutputTokens < 1 ||
+        maxOutputTokens > 4096) {
+      setState(() {
+        _promptStatus = 'Error';
+        _promptError =
+            'Maximum output tokens must be a whole number from 1 to 4096.';
+      });
+      return;
+    }
+
+    if (seed == null || seed < 0 || seed > 2147483647) {
+      setState(() {
+        _promptStatus = 'Error';
+        _promptError =
+            'Seed must be a whole number from 0 to 2147483647.';
+      });
+      return;
+    }
+
+    if (topK == null || topK < 1 || topK > 2147483647) {
+      setState(() {
+        _promptStatus = 'Error';
+        _promptError =
+            'Top-K must be a whole number from 1 to 2147483647.';
+      });
+      return;
+    }
+
+    if (candidateCount == null || candidateCount < 1 || candidateCount > 8) {
+      setState(() {
+        _promptStatus = 'Error';
+        _promptError = 'Candidate count must be a whole number from 1 to 8.';
+      });
+      return;
+    }
 
     setState(() {
       _isRunningPrompt = true;
       _promptStatus = 'Starting…';
       _promptOutput = '';
+      _candidates = <Map<String, dynamic>>[];
       _submittedPrompt = prompt;
       _submittedSystemInstruction = systemInstructionToSend;
+      _submittedTemperature = _temperature;
+      _submittedMaxOutputTokens = maxOutputTokens;
+      _submittedSeed = seed;
+      _submittedTopK = topK;
+      _submittedCandidateCount = candidateCount;
       _promptError = null;
       _elapsedMilliseconds = null;
+      _requestTokens = null;
+      _tokenLimit = null;
+      _finishReason = null;
+      _finishReasonCode = null;
     });
 
     try {
+      final tokenResult = await _nativeChannel
+          .invokeMapMethod<String, dynamic>('getTokenInfo', <String, dynamic>{
+            'prompt': prompt,
+            'systemInstruction': systemInstruction,
+            'temperature': _temperature,
+            'maxOutputTokens': maxOutputTokens,
+            'seed': seed,
+            'topK': topK,
+            'candidateCount': candidateCount,
+            'modelReleaseStage': _modelReleaseStage,
+          });
+
+      if (!mounted) {
+        return;
+      }
+
+      if (tokenResult == null) {
+        setState(() {
+          _isRunningPrompt = false;
+          _promptStatus = 'Error';
+          _promptError = 'Kotlin returned no token information.';
+        });
+        return;
+      }
+
+      final nativeTokenPrompt = tokenResult['prompt']?.toString();
+      final nativeTokenSystemInstruction = tokenResult['systemInstruction']
+          ?.toString();
+      final nativeTokenTemperature = tokenResult['temperature'];
+      final nativeTokenMaxOutputTokens = _readInteger(
+        tokenResult['maxOutputTokens'],
+      );
+      final nativeTokenSeed = _readInteger(tokenResult['seed']);
+      final nativeTokenTopK = _readInteger(tokenResult['topK']);
+      final nativeTokenCandidateCount = _readInteger(
+        tokenResult['candidateCount'],
+      );
+
+      if (nativeTokenPrompt != prompt ||
+          nativeTokenSystemInstruction != systemInstructionToSend ||
+          nativeTokenTemperature is! double ||
+          nativeTokenTemperature != _temperature ||
+          nativeTokenMaxOutputTokens != maxOutputTokens ||
+          nativeTokenSeed != seed ||
+          nativeTokenTopK != topK ||
+          nativeTokenCandidateCount != candidateCount) {
+        setState(() {
+          _isRunningPrompt = false;
+          _promptStatus = 'Error';
+          _promptError =
+              'The token-count request did not match the displayed instructions.';
+        });
+        return;
+      }
+
+      final requestTokens = _readInteger(tokenResult['requestTokens']);
+      final tokenLimit = _readInteger(tokenResult['tokenLimit']);
+
+      if (requestTokens == null || tokenLimit == null) {
+        setState(() {
+          _isRunningPrompt = false;
+          _promptStatus = 'Error';
+          _promptError = 'Kotlin returned incomplete token information.';
+        });
+        return;
+      }
+
+      setState(() {
+        _requestTokens = requestTokens;
+        _tokenLimit = tokenLimit;
+      });
+
       final result = await _nativeChannel.invokeMapMethod<String, dynamic>(
         'runPrompt',
         <String, dynamic>{
           'prompt': prompt,
           'systemInstruction': systemInstruction,
+          'temperature': _temperature,
+          'maxOutputTokens': maxOutputTokens,
+          'seed': seed,
+          'topK': topK,
+          'candidateCount': candidateCount,
+          'modelReleaseStage': _modelReleaseStage,
         },
       );
 
@@ -322,9 +515,20 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
 
       final nativePrompt = result['prompt']?.toString();
       final nativeSystemInstruction = result['systemInstruction']?.toString();
+      final nativeTemperature = result['temperature'];
+      final nativeMaxOutputTokens = _readInteger(result['maxOutputTokens']);
+      final nativeSeed = _readInteger(result['seed']);
+      final nativeTopK = _readInteger(result['topK']);
+      final nativeCandidateCount = _readInteger(result['candidateCount']);
 
       if (nativePrompt != prompt ||
-          nativeSystemInstruction != systemInstructionToSend) {
+          nativeSystemInstruction != systemInstructionToSend ||
+          nativeTemperature is! double ||
+          nativeTemperature != _temperature ||
+          nativeMaxOutputTokens != maxOutputTokens ||
+          nativeSeed != seed ||
+          nativeTopK != topK ||
+          nativeCandidateCount != candidateCount) {
         setState(() {
           _isRunningPrompt = false;
           _promptStatus = 'Error';
@@ -341,7 +545,7 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
         _isRunningPrompt = false;
         _promptStatus = 'Error';
         _promptError =
-            '${error.message ?? 'Gemini Nano inference could not be started.'}\n'
+            '${error.message ?? 'Token counting or Gemini Nano inference could not be started.'}\n'
             'Platform error: ${error.code}';
       });
     } catch (error) {
@@ -363,8 +567,18 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
       _promptOutput = '';
       _submittedPrompt = null;
       _submittedSystemInstruction = null;
+      _submittedTemperature = null;
+      _submittedMaxOutputTokens = null;
+      _submittedSeed = null;
+      _submittedTopK = null;
+      _submittedCandidateCount = null;
+      _candidates = <Map<String, dynamic>>[];
       _promptError = null;
       _elapsedMilliseconds = null;
+      _requestTokens = null;
+      _tokenLimit = null;
+      _finishReason = null;
+      _finishReasonCode = null;
     });
   }
 
@@ -428,11 +642,22 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
           _isRunningPrompt = true;
           _promptStatus = 'Generating…';
           _promptOutput = '';
+          _candidates = <Map<String, dynamic>>[];
           _submittedPrompt = event['prompt']?.toString();
           _submittedSystemInstruction =
               event['systemInstruction']?.toString();
+          final eventTemperature = event['temperature'];
+          _submittedTemperature = eventTemperature is double
+              ? eventTemperature
+              : null;
+          _submittedMaxOutputTokens = _readInteger(event['maxOutputTokens']);
+          _submittedSeed = _readInteger(event['seed']);
+          _submittedTopK = _readInteger(event['topK']);
+          _submittedCandidateCount = _readInteger(event['candidateCount']);
           _promptError = null;
           _elapsedMilliseconds = null;
+          _finishReason = null;
+          _finishReasonCode = null;
           break;
 
         case 'chunk':
@@ -442,7 +667,41 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
 
         case 'completed':
           _isRunningPrompt = false;
-          _promptStatus = 'Completed';
+          final candidateValues = event['candidates'];
+          if (candidateValues is List) {
+            _candidates = candidateValues
+                .whereType<Map>()
+                .map(
+                  (candidate) => <String, dynamic>{
+                    'text': candidate['text']?.toString() ?? '',
+                    'finishReason': candidate['finishReason']?.toString(),
+                    'finishReasonCode': _readInteger(
+                      candidate['finishReasonCode'],
+                    ),
+                  },
+                )
+                .toList();
+            if (_candidates.length == 1) {
+              _promptOutput = _candidates.first['text']?.toString() ?? '';
+            }
+          }
+          _finishReason = event['finishReason']?.toString();
+          _finishReasonCode = _readInteger(event['finishReasonCode']);
+
+          switch (_finishReason) {
+            case 'STOP':
+              _promptStatus = 'Completed';
+              break;
+            case 'MAX_TOKENS':
+              _promptStatus = 'Stopped at token limit';
+              break;
+            case 'OTHER':
+              _promptStatus = 'Stopped for another reason';
+              break;
+            default:
+              _promptStatus = 'Finished; reason unknown';
+          }
+
           _elapsedMilliseconds = _readInteger(event['elapsedMilliseconds']);
           break;
 
@@ -514,6 +773,20 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final statusColor = _statusColor(colors);
+    final maxOutputTokens = int.tryParse(_maxOutputTokensController.text);
+    final hasValidMaxOutputTokens =
+        maxOutputTokens != null &&
+        maxOutputTokens >= 1 &&
+        maxOutputTokens <= 4096;
+    final seed = int.tryParse(_seedController.text);
+    final hasValidSeed =
+        seed != null && seed >= 0 && seed <= 2147483647;
+    final topK = int.tryParse(_topKController.text);
+    final hasValidTopK =
+        topK != null && topK >= 1 && topK <= 2147483647;
+    final candidateCount = int.tryParse(_candidateCountController.text);
+    final hasValidCandidateCount =
+        candidateCount != null && candidateCount >= 1 && candidateCount <= 8;
 
     double? progress;
 
@@ -537,6 +810,27 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
               const Text(
                 'Check whether the ML Kit Prompt API is available through '
                 'AICore.',
+              ),
+              const SizedBox(height: 20),
+              DropdownButtonFormField<String>(
+                initialValue: _modelReleaseStage,
+                decoration: const InputDecoration(
+                  border: OutlineInputBorder(),
+                  labelText: 'Model release stage',
+                ),
+                items: const [
+                  DropdownMenuItem(value: 'STABLE', child: Text('Stable')),
+                  DropdownMenuItem(value: 'PREVIEW', child: Text('Preview')),
+                ],
+                onChanged: _isChecking ||
+                        _isStartingDownload ||
+                        _isRunningPrompt
+                    ? null
+                    : (value) {
+                        if (value != null && value != _modelReleaseStage) {
+                          _setModelReleaseStage(value);
+                        }
+                      },
               ),
               const SizedBox(height: 24),
               Card(
@@ -692,11 +986,103 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
                   hintText: 'Enter a prompt for Gemini Nano.',
                 ),
               ),
+              const SizedBox(height: 20),
+              Text('Temperature: ${_temperature.toStringAsFixed(1)}'),
+              Slider(
+                value: _temperature,
+                min: 0.0,
+                max: 1.0,
+                divisions: 10,
+                label: _temperature.toStringAsFixed(1),
+                onChanged: _isRunningPrompt
+                    ? null
+                    : (value) {
+                        setState(() {
+                          _temperature = value;
+                        });
+                      },
+              ),
+              const SizedBox(height: 8),
+              const Text('Maximum output tokens:'),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _maxOutputTokensController,
+                enabled: !_isRunningPrompt,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                onChanged: (_) => setState(() {}),
+                decoration: InputDecoration(
+                  border: const OutlineInputBorder(),
+                  helperText: 'Enter a whole number from 1 to 4096.',
+                  errorText: _maxOutputTokensController.text.isEmpty ||
+                          hasValidMaxOutputTokens
+                      ? null
+                      : 'Enter a value from 1 to 4096.',
+                ),
+              ),
+              const SizedBox(height: 20),
+              const Text('Seed:'),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _seedController,
+                enabled: !_isRunningPrompt,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                onChanged: (_) => setState(() {}),
+                decoration: InputDecoration(
+                  border: const OutlineInputBorder(),
+                  helperText:
+                      'Use 0 for varying seeds or a fixed positive number.',
+                  errorText: _seedController.text.isEmpty || hasValidSeed
+                      ? null
+                      : 'Enter a value from 0 to 2147483647.',
+                ),
+              ),
+              const SizedBox(height: 20),
+              const Text('Top-K:'),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _topKController,
+                enabled: !_isRunningPrompt,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                onChanged: (_) => setState(() {}),
+                decoration: InputDecoration(
+                  border: const OutlineInputBorder(),
+                  helperText: 'Default is 3. Use a positive whole number.',
+                  errorText: _topKController.text.isEmpty || hasValidTopK
+                      ? null
+                      : 'Enter a value from 1 to 2147483647.',
+                ),
+              ),
+              const SizedBox(height: 20),
+              const Text('Candidate count:'),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _candidateCountController,
+                enabled: !_isRunningPrompt,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                onChanged: (_) => setState(() {}),
+                decoration: InputDecoration(
+                  border: const OutlineInputBorder(),
+                  helperText:
+                      'Request 1 to 8 unique responses. Multiple candidates are not streamed.',
+                  errorText: _candidateCountController.text.isEmpty ||
+                          hasValidCandidateCount
+                      ? null
+                      : 'Enter a value from 1 to 8.',
+                ),
+              ),
               const SizedBox(height: 12),
               FilledButton.icon(
                 onPressed:
                     _status == 'AVAILABLE' &&
                         !_isRunningPrompt &&
+                        hasValidMaxOutputTokens &&
+                        hasValidSeed &&
+                        hasValidTopK &&
+                        hasValidCandidateCount &&
                         _promptController.text.trim().isNotEmpty
                     ? _runPrompt
                     : null,
@@ -715,6 +1101,7 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
                 onPressed:
                     !_isRunningPrompt &&
                         (_promptOutput.isNotEmpty ||
+                            _candidates.isNotEmpty ||
                             _promptError != null ||
                             _elapsedMilliseconds != null)
                     ? _clearPromptOutput
@@ -740,6 +1127,38 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
                           '${_formatElapsedTime(_elapsedMilliseconds!)}',
                         ),
                       ],
+                      if (_finishReason != null) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          'Finish reason: $_finishReason'
+                          '${_finishReasonCode == null ? '' : ' ($_finishReasonCode)'}',
+                        ),
+                      ],
+                      if (_requestTokens != null && _tokenLimit != null) ...[
+                        const SizedBox(height: 8),
+                        Text('Request tokens: $_requestTokens'),
+                        Text(
+                          'Combined input/output limit: $_tokenLimit tokens',
+                        ),
+                      ],
+                      if (_submittedTemperature != null &&
+                          _submittedMaxOutputTokens != null &&
+                          _submittedSeed != null &&
+                          _submittedTopK != null) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          'Temperature: '
+                          '${_submittedTemperature!.toStringAsFixed(1)}',
+                        ),
+                        Text(
+                          'Maximum output tokens: '
+                          '$_submittedMaxOutputTokens',
+                        ),
+                        Text('Seed: $_submittedSeed'),
+                        Text('Top-K: $_submittedTopK'),
+                        if (_submittedCandidateCount != null)
+                          Text('Candidate count: $_submittedCandidateCount'),
+                      ],
                       if (_submittedPrompt != null) ...[
                         const SizedBox(height: 16),
                         const Text(
@@ -759,11 +1178,34 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
                         SelectableText(_submittedPrompt!),
                       ],
                       const SizedBox(height: 16),
-                      SelectableText(
-                        _promptOutput.isEmpty
-                            ? 'Streaming output will appear here.'
-                            : _promptOutput,
-                      ),
+                      if (_candidates.length > 1)
+                        for (var index = 0; index < _candidates.length; index++) ...[
+                          Text(
+                            'Candidate ${index + 1}',
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 8),
+                          SelectableText(
+                            _candidates[index]['text']?.toString() ?? '',
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Finish reason: '
+                            '${_candidates[index]['finishReason'] ?? 'UNKNOWN'}'
+                            '${_candidates[index]['finishReasonCode'] == null ? '' : ' (${_candidates[index]['finishReasonCode']})'}',
+                          ),
+                          if (index < _candidates.length - 1)
+                            const Divider(height: 32),
+                        ]
+                      else
+                        SelectableText(
+                          _promptOutput.isEmpty
+                              ? (_submittedCandidateCount != null &&
+                                        _submittedCandidateCount! > 1
+                                    ? 'Candidate responses will appear when generation completes.'
+                                    : 'Streaming output will appear here.')
+                              : _promptOutput,
+                        ),
                       if (_promptError != null) ...[
                         const SizedBox(height: 16),
                         SelectableText(

@@ -5,9 +5,13 @@ import android.os.SystemClock
 import com.google.mlkit.genai.common.DownloadCallback
 import com.google.mlkit.genai.common.FeatureStatus
 import com.google.mlkit.genai.common.GenAiException
+import com.google.mlkit.genai.prompt.Candidate
 import com.google.mlkit.genai.prompt.GenerateContentRequest
 import com.google.mlkit.genai.prompt.Generation
+import com.google.mlkit.genai.prompt.GenerationConfig
 import com.google.mlkit.genai.prompt.GenerativeModel
+import com.google.mlkit.genai.prompt.ModelConfig
+import com.google.mlkit.genai.prompt.ModelReleaseStage
 import com.google.mlkit.genai.prompt.SystemInstruction
 import com.google.mlkit.genai.prompt.TextPart
 import com.google.mlkit.genai.prompt.java.GenerativeModelFutures
@@ -32,10 +36,13 @@ class MainActivity : FlutterActivity() {
         const val METHOD_GET_TOKEN_INFO = "getTokenInfo"
         const val METHOD_START_PROMPT_DOWNLOAD = "startPromptDownload"
         const val METHOD_RUN_PROMPT = "runPrompt"
+        const val METHOD_SET_MODEL_RELEASE_STAGE = "setModelReleaseStage"
     }
 
     private lateinit var generativeModel: GenerativeModel
     private lateinit var generativeModelFutures: GenerativeModelFutures
+    private var modelReleaseStage = ModelReleaseStage.STABLE
+    private var modelReleaseStageName = "STABLE"
 
     private var downloadEventSink: EventChannel.EventSink? = null
     private var promptEventSink: EventChannel.EventSink? = null
@@ -51,8 +58,7 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
-        generativeModel = Generation.getClient()
-        generativeModelFutures = GenerativeModelFutures.from(generativeModel)
+        configureGenerativeModel(ModelReleaseStage.STABLE, "STABLE")
 
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
@@ -66,13 +72,28 @@ class MainActivity : FlutterActivity() {
                     getTokenInfo(
                         call.argument<String>("prompt"),
                         call.argument<String>("systemInstruction"),
+                        call.argument<Number>("temperature")?.toDouble(),
+                        call.argument<Number>("maxOutputTokens")?.toInt(),
+                        call.argument<Number>("seed")?.toInt(),
+                        call.argument<Number>("topK")?.toInt(),
+                        call.argument<Number>("candidateCount")?.toInt(),
                         result,
                     )
                 METHOD_START_PROMPT_DOWNLOAD -> startPromptDownload(result)
+                METHOD_SET_MODEL_RELEASE_STAGE ->
+                    setModelReleaseStage(
+                        call.argument<String>("modelReleaseStage"),
+                        result,
+                    )
                 METHOD_RUN_PROMPT ->
                     runPrompt(
                         call.argument<String>("prompt"),
                         call.argument<String>("systemInstruction"),
+                        call.argument<Number>("temperature")?.toDouble(),
+                        call.argument<Number>("maxOutputTokens")?.toInt(),
+                        call.argument<Number>("seed")?.toInt(),
+                        call.argument<Number>("topK")?.toInt(),
+                        call.argument<Number>("candidateCount")?.toInt(),
                         result,
                     )
                 else -> result.notImplemented()
@@ -116,6 +137,56 @@ class MainActivity : FlutterActivity() {
         )
     }
 
+    private fun configureGenerativeModel(
+        releaseStage: Int,
+        releaseStageName: String,
+    ) {
+        val modelConfig =
+            ModelConfig.Builder().apply {
+                this.releaseStage = releaseStage
+            }.build()
+        val generationConfig =
+            GenerationConfig.Builder().apply {
+                this.modelConfig = modelConfig
+            }.build()
+
+        generativeModel = Generation.getClient(generationConfig)
+        generativeModelFutures = GenerativeModelFutures.from(generativeModel)
+        modelReleaseStage = releaseStage
+        modelReleaseStageName = releaseStageName
+    }
+
+    private fun setModelReleaseStage(
+        requestedStage: String?,
+        result: MethodChannel.Result,
+    ) {
+        if (isInferenceInProgress || isDownloadInProgress) {
+            result.error(
+                "MODEL_CHANGE_BLOCKED",
+                "Wait for the current Gemini Nano operation to finish.",
+                null,
+            )
+            return
+        }
+
+        val releaseStage =
+            when (requestedStage) {
+                "STABLE" -> ModelReleaseStage.STABLE
+                "PREVIEW" -> ModelReleaseStage.PREVIEW
+                else -> {
+                    result.error(
+                        "INVALID_MODEL_RELEASE_STAGE",
+                        "Model release stage must be STABLE or PREVIEW.",
+                        null,
+                    )
+                    return
+                }
+            }
+
+        configureGenerativeModel(releaseStage, requestedStage)
+        result.success(mapOf("modelReleaseStage" to modelReleaseStageName))
+    }
+
     private fun checkPromptStatus(result: MethodChannel.Result) {
         val statusFuture = generativeModelFutures.checkStatus()
         val mainExecutor = Executor { command -> runOnUiThread(command) }
@@ -124,7 +195,10 @@ class MainActivity : FlutterActivity() {
             {
                 try {
                     val status = statusFuture.get()
-                    result.success(createStatusResult(status))
+                    result.success(
+                        createStatusResult(status) +
+                            ("modelReleaseStage" to modelReleaseStageName),
+                    )
                 } catch (error: Exception) {
                     sendStatusError(result, error)
                 }
@@ -249,6 +323,11 @@ class MainActivity : FlutterActivity() {
     private fun getTokenInfo(
         prompt: String?,
         systemInstruction: String?,
+        temperature: Double?,
+        maxOutputTokens: Int?,
+        seed: Int?,
+        topK: Int?,
+        candidateCount: Int?,
         result: MethodChannel.Result,
     ) {
         if (prompt.isNullOrBlank()) {
@@ -260,9 +339,30 @@ class MainActivity : FlutterActivity() {
             return
         }
 
+        if (!validateGenerationSettings(
+                temperature,
+                maxOutputTokens,
+                seed,
+                topK,
+                candidateCount,
+                result,
+            )
+        ) {
+            return
+        }
+
         val systemInstructionText =
             systemInstruction?.takeUnless { it.isBlank() }
-        val request = createGenerateContentRequest(prompt, systemInstructionText)
+        val request =
+            createGenerateContentRequest(
+                prompt,
+                systemInstructionText,
+                temperature,
+                maxOutputTokens,
+                seed,
+                topK,
+                candidateCount,
+            )
         val countFuture = generativeModelFutures.countTokens(request)
         val mainExecutor = Executor { command -> runOnUiThread(command) }
 
@@ -281,6 +381,12 @@ class MainActivity : FlutterActivity() {
                                         "tokenLimit" to limitFuture.get(),
                                         "prompt" to prompt,
                                         "systemInstruction" to systemInstructionText,
+                                        "temperature" to temperature,
+                                        "maxOutputTokens" to maxOutputTokens,
+                                        "seed" to seed,
+                                        "topK" to topK,
+                                        "candidateCount" to candidateCount,
+                                        "modelReleaseStage" to modelReleaseStageName,
                                     ),
                                 )
                             } catch (error: Exception) {
@@ -300,6 +406,11 @@ class MainActivity : FlutterActivity() {
     private fun runPrompt(
         prompt: String?,
         systemInstruction: String?,
+        temperature: Double?,
+        maxOutputTokens: Int?,
+        seed: Int?,
+        topK: Int?,
+        candidateCount: Int?,
         result: MethodChannel.Result,
     ) {
         if (prompt.isNullOrBlank()) {
@@ -308,6 +419,18 @@ class MainActivity : FlutterActivity() {
                 "Enter a prompt before starting Gemini Nano inference.",
                 null,
             )
+            return
+        }
+
+        if (!validateGenerationSettings(
+                temperature,
+                maxOutputTokens,
+                seed,
+                topK,
+                candidateCount,
+                result,
+            )
+        ) {
             return
         }
 
@@ -340,23 +463,39 @@ class MainActivity : FlutterActivity() {
                 "event" to "started",
                 "prompt" to prompt,
                 "systemInstruction" to systemInstructionText,
+                "temperature" to temperature,
+                "maxOutputTokens" to maxOutputTokens,
+                "seed" to seed,
+                "topK" to topK,
+                "candidateCount" to candidateCount,
+                "modelReleaseStage" to modelReleaseStageName,
             ),
         )
 
         try {
             val request =
-                createGenerateContentRequest(prompt, systemInstructionText)
+                createGenerateContentRequest(
+                    prompt,
+                    systemInstructionText,
+                    temperature,
+                    maxOutputTokens,
+                    seed,
+                    topK,
+                    candidateCount,
+                )
 
             val inferenceFuture =
-                generativeModelFutures.generateContent(
-                    request,
-                ) { chunk ->
-                    sendPromptEvent(
-                        mapOf(
-                            "event" to "chunk",
-                            "text" to chunk,
-                        ),
-                    )
+                if (candidateCount == 1) {
+                    generativeModelFutures.generateContent(request) { chunk ->
+                        sendPromptEvent(
+                            mapOf(
+                                "event" to "chunk",
+                                "text" to chunk,
+                            ),
+                        )
+                    }
+                } else {
+                    generativeModelFutures.generateContent(request)
                 }
 
             val mainExecutor = Executor { command -> runOnUiThread(command) }
@@ -364,12 +503,27 @@ class MainActivity : FlutterActivity() {
             inferenceFuture.addListener(
                 {
                     try {
-                        inferenceFuture.get()
+                        val response = inferenceFuture.get()
+                        val finishReason =
+                            response.candidates.first().finishReason
+                        val candidates =
+                            response.candidates.map { candidate ->
+                                mapOf(
+                                    "text" to candidate.text,
+                                    "finishReason" to
+                                        createFinishReasonName(candidate.finishReason),
+                                    "finishReasonCode" to candidate.finishReason,
+                                )
+                            }
                         isInferenceInProgress = false
 
                         sendPromptEvent(
                             mapOf(
                                 "event" to "completed",
+                                "finishReason" to
+                                    createFinishReasonName(finishReason),
+                                "finishReasonCode" to finishReason,
+                                "candidates" to candidates,
                                 "elapsedMilliseconds" to
                                     SystemClock.elapsedRealtime() - startedAt,
                             ),
@@ -387,6 +541,12 @@ class MainActivity : FlutterActivity() {
                     "started" to true,
                     "prompt" to prompt,
                     "systemInstruction" to systemInstructionText,
+                    "temperature" to temperature,
+                    "maxOutputTokens" to maxOutputTokens,
+                    "seed" to seed,
+                    "topK" to topK,
+                    "candidateCount" to candidateCount,
+                    "modelReleaseStage" to modelReleaseStageName,
                 ),
             )
         } catch (error: Exception) {
@@ -444,16 +604,96 @@ class MainActivity : FlutterActivity() {
     private fun createGenerateContentRequest(
         prompt: String,
         systemInstruction: String?,
+        temperature: Double?,
+        maxOutputTokens: Int?,
+        seed: Int?,
+        topK: Int?,
+        candidateCount: Int?,
     ): GenerateContentRequest {
-        return if (systemInstruction == null) {
-            GenerateContentRequest.Builder(
-                TextPart(prompt),
-            ).build()
-        } else {
-            GenerateContentRequest.Builder(
-                SystemInstruction(systemInstruction),
-                TextPart(prompt),
-            ).build()
+        val builder =
+            if (systemInstruction == null) {
+                GenerateContentRequest.Builder(
+                    TextPart(prompt),
+                )
+            } else {
+                GenerateContentRequest.Builder(
+                    SystemInstruction(systemInstruction),
+                    TextPart(prompt),
+                )
+            }
+
+        temperature?.let { builder.temperature = it.toFloat() }
+        maxOutputTokens?.let { builder.maxOutputTokens = it }
+        seed?.let { builder.seed = it }
+        topK?.let { builder.topK = it }
+        candidateCount?.let { builder.candidateCount = it }
+
+        return builder.build()
+    }
+
+    private fun validateGenerationSettings(
+        temperature: Double?,
+        maxOutputTokens: Int?,
+        seed: Int?,
+        topK: Int?,
+        candidateCount: Int?,
+        result: MethodChannel.Result,
+    ): Boolean {
+        if (temperature != null && temperature !in 0.0..1.0) {
+            result.error(
+                "INVALID_TEMPERATURE",
+                "Temperature must be between 0.0 and 1.0.",
+                null,
+            )
+            return false
+        }
+
+        if (maxOutputTokens != null && maxOutputTokens !in 1..4096) {
+            result.error(
+                "INVALID_MAX_OUTPUT_TOKENS",
+                "Maximum output tokens must be between 1 and 4096.",
+                null,
+            )
+            return false
+        }
+
+        if (seed != null && seed < 0) {
+            result.error(
+                "INVALID_SEED",
+                "Seed must be a non-negative whole number.",
+                null,
+            )
+            return false
+        }
+
+        if (topK != null && topK < 1) {
+            result.error(
+                "INVALID_TOP_K",
+                "Top-K must be a positive whole number.",
+                null,
+            )
+            return false
+        }
+
+        if (candidateCount != null && candidateCount !in 1..8) {
+            result.error(
+                "INVALID_CANDIDATE_COUNT",
+                "Candidate count must be between 1 and 8.",
+                null,
+            )
+            return false
+        }
+
+        return true
+    }
+
+    private fun createFinishReasonName(finishReason: Int?): String {
+        return when (finishReason) {
+            Candidate.FinishReason.STOP -> "STOP"
+            Candidate.FinishReason.MAX_TOKENS -> "MAX_TOKENS"
+            Candidate.FinishReason.OTHER -> "OTHER"
+            null -> "UNKNOWN"
+            else -> "UNKNOWN"
         }
     }
 
