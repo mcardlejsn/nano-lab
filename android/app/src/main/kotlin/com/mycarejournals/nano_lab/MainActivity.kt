@@ -1,6 +1,7 @@
 package com.mycarejournals.nano_lab
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -86,9 +87,10 @@ class MainActivity : FlutterActivity() {
             "getImageDescriptionTestImage"
         const val METHOD_RUN_IMAGE_DESCRIPTION = "runImageDescription"
 
-        const val IMAGE_DESCRIPTION_TEST_IMAGE_ID = "synthetic_house_scene_v1"
-        const val IMAGE_DESCRIPTION_TEST_IMAGE_WIDTH = 768
-        const val IMAGE_DESCRIPTION_TEST_IMAGE_HEIGHT = 512
+        const val SYNTHETIC_IMAGE_ID = "synthetic_house_scene_v1"
+        const val SYNTHETIC_IMAGE_WIDTH = 768
+        const val SYNTHETIC_IMAGE_HEIGHT = 512
+        const val REAL_PHOTO_IMAGE_ID = "real_tabletop_photo_v1"
     }
 
     private lateinit var generativeModel: GenerativeModel
@@ -207,8 +209,15 @@ class MainActivity : FlutterActivity() {
                 METHOD_START_IMAGE_DESCRIPTION_DOWNLOAD ->
                     startImageDescriptionDownload(result)
                 METHOD_GET_IMAGE_DESCRIPTION_TEST_IMAGE ->
-                    getImageDescriptionTestImage(result)
-                METHOD_RUN_IMAGE_DESCRIPTION -> runImageDescription(result)
+                    getImageDescriptionTestImage(
+                        call.argument<String>("imageId"),
+                        result,
+                    )
+                METHOD_RUN_IMAGE_DESCRIPTION ->
+                    runImageDescription(
+                        call.argument<String>("imageId"),
+                        result,
+                    )
                 else -> result.notImplemented()
             }
         }
@@ -1168,10 +1177,23 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun getImageDescriptionTestImage(result: MethodChannel.Result) {
+    private fun getImageDescriptionTestImage(
+        imageId: String?,
+        result: MethodChannel.Result,
+    ) {
+        val selectedImageId = imageId ?: SYNTHETIC_IMAGE_ID
+        if (!isSupportedImageDescriptionTestImage(selectedImageId)) {
+            result.error(
+                "INVALID_TEST_IMAGE",
+                "Select a recognized image-description test image.",
+                null,
+            )
+            return
+        }
+
         val bitmap =
             try {
-                createImageDescriptionTestBitmap()
+                createImageDescriptionTestBitmap(selectedImageId)
             } catch (error: Exception) {
                 result.error(
                     "TEST_IMAGE_CREATION_FAILED",
@@ -1198,9 +1220,9 @@ class MainActivity : FlutterActivity() {
             result.success(
                 mapOf(
                     "imageBytes" to outputStream.toByteArray(),
-                    "imageId" to IMAGE_DESCRIPTION_TEST_IMAGE_ID,
-                    "width" to IMAGE_DESCRIPTION_TEST_IMAGE_WIDTH,
-                    "height" to IMAGE_DESCRIPTION_TEST_IMAGE_HEIGHT,
+                    "imageId" to selectedImageId,
+                    "width" to bitmap.width,
+                    "height" to bitmap.height,
                 ),
             )
         } catch (error: Exception) {
@@ -1214,7 +1236,20 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun runImageDescription(result: MethodChannel.Result) {
+    private fun runImageDescription(
+        imageId: String?,
+        result: MethodChannel.Result,
+    ) {
+        val selectedImageId = imageId ?: SYNTHETIC_IMAGE_ID
+        if (!isSupportedImageDescriptionTestImage(selectedImageId)) {
+            result.error(
+                "INVALID_TEST_IMAGE",
+                "Select a recognized image-description test image.",
+                null,
+            )
+            return
+        }
+
         if (isInferenceInProgress) {
             result.error(
                 "INFERENCE_ALREADY_RUNNING",
@@ -1228,7 +1263,7 @@ class MainActivity : FlutterActivity() {
         val startedAt = SystemClock.elapsedRealtime()
         val bitmap =
             try {
-                createImageDescriptionTestBitmap()
+                createImageDescriptionTestBitmap(selectedImageId)
             } catch (error: Exception) {
                 isInferenceInProgress = false
                 sendImageDescriptionInferenceError(result, error, startedAt)
@@ -1248,9 +1283,9 @@ class MainActivity : FlutterActivity() {
 
                         result.success(
                             mapOf(
-                                "imageId" to IMAGE_DESCRIPTION_TEST_IMAGE_ID,
-                                "width" to IMAGE_DESCRIPTION_TEST_IMAGE_WIDTH,
-                                "height" to IMAGE_DESCRIPTION_TEST_IMAGE_HEIGHT,
+                                "imageId" to selectedImageId,
+                                "width" to bitmap.width,
+                                "height" to bitmap.height,
                                 "output" to output,
                                 "elapsedMilliseconds" to
                                     SystemClock.elapsedRealtime() - startedAt,
@@ -1272,11 +1307,29 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun createImageDescriptionTestBitmap(): Bitmap {
+    private fun isSupportedImageDescriptionTestImage(imageId: String): Boolean {
+        return imageId == SYNTHETIC_IMAGE_ID || imageId == REAL_PHOTO_IMAGE_ID
+    }
+
+    private fun createImageDescriptionTestBitmap(imageId: String): Bitmap {
+        return when (imageId) {
+            SYNTHETIC_IMAGE_ID -> createSyntheticImageDescriptionTestBitmap()
+            REAL_PHOTO_IMAGE_ID ->
+                BitmapFactory.decodeResource(
+                    resources,
+                    R.drawable.nano_lab_real_tabletop_photo_v1,
+                ) ?: throw IllegalStateException(
+                    "The bundled real tabletop photo could not be decoded.",
+                )
+            else -> throw IllegalArgumentException("Unknown test image: $imageId")
+        }
+    }
+
+    private fun createSyntheticImageDescriptionTestBitmap(): Bitmap {
         val bitmap =
             Bitmap.createBitmap(
-                IMAGE_DESCRIPTION_TEST_IMAGE_WIDTH,
-                IMAGE_DESCRIPTION_TEST_IMAGE_HEIGHT,
+                SYNTHETIC_IMAGE_WIDTH,
+                SYNTHETIC_IMAGE_HEIGHT,
                 Bitmap.Config.ARGB_8888,
             )
         val canvas = Canvas(bitmap)

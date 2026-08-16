@@ -99,6 +99,10 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
     'com.mycarejournals.nano_lab/image_description_download_events',
   );
 
+  static const _syntheticImageDescriptionTestImageId =
+      'synthetic_house_scene_v1';
+  static const _realPhotoImageDescriptionTestImageId = 'real_tabletop_photo_v1';
+
   static const _defaultPrompt =
       'Write exactly three short sentences about a fictional robot learning '
       'to garden.';
@@ -180,6 +184,7 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
   bool _isCheckingImageDescription = false;
   bool _isStartingImageDescriptionDownload = false;
   bool _isRunningImageDescription = false;
+  bool _isLoadingImageDescriptionTestImage = false;
   bool _systemInstructionAvailable = false;
   double _temperature = 0.0;
   String _modelReleaseStage = 'STABLE';
@@ -257,6 +262,8 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
       'Check whether the dedicated ML Kit Image Description API is available.';
   String? _imageDescriptionError;
   String? _imageDescriptionDownloadMessage;
+  String _selectedImageDescriptionTestImageId =
+      _syntheticImageDescriptionTestImageId;
   Uint8List? _imageDescriptionTestImageBytes;
   String? _imageDescriptionTestImageId;
   int? _imageDescriptionTestImageWidth;
@@ -824,8 +831,7 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
   Future<void> _startRewritingDownload() async {
     setState(() {
       _isStartingRewritingDownload = true;
-      _rewritingDownloadMessage =
-          'Requesting the rewriting asset download…';
+      _rewritingDownloadMessage = 'Requesting the rewriting asset download…';
       _rewritingDownloadedBytes = null;
       _rewritingTotalBytes = null;
       _rewritingError = null;
@@ -1163,10 +1169,22 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
     }
   }
 
-  Future<void> _loadImageDescriptionTestImage() async {
+  Future<void> _loadImageDescriptionTestImage({String? imageId}) async {
+    final requestedImageId = imageId ?? _selectedImageDescriptionTestImageId;
+
+    setState(() {
+      _isLoadingImageDescriptionTestImage = true;
+      _imageDescriptionTestImageBytes = null;
+      _imageDescriptionTestImageId = null;
+      _imageDescriptionTestImageWidth = null;
+      _imageDescriptionTestImageHeight = null;
+      _imageDescriptionError = null;
+    });
+
     try {
       final result = await _nativeChannel.invokeMapMethod<String, dynamic>(
         'getImageDescriptionTestImage',
+        <String, dynamic>{'imageId': requestedImageId},
       );
 
       if (!mounted) {
@@ -1178,6 +1196,14 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
         setState(() {
           _imageDescriptionError =
               'Kotlin returned no valid image-description test image.';
+        });
+        return;
+      }
+
+      if (result['imageId']?.toString() != requestedImageId) {
+        setState(() {
+          _imageDescriptionError =
+              'Kotlin returned a different image-description test image.';
         });
         return;
       }
@@ -1207,7 +1233,24 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
         _imageDescriptionError =
             'Unexpected image-description test-image error: $error';
       });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingImageDescriptionTestImage = false;
+        });
+      }
     }
+  }
+
+  Future<void> _selectImageDescriptionTestImage(String imageId) async {
+    setState(() {
+      _selectedImageDescriptionTestImageId = imageId;
+      _imageDescriptionOutput = '';
+      _imageDescriptionElapsedMilliseconds = null;
+      _imageDescriptionError = null;
+    });
+
+    await _loadImageDescriptionTestImage(imageId: imageId);
   }
 
   Future<void> _checkImageDescriptionStatus() async {
@@ -1341,6 +1384,7 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
     try {
       final result = await _nativeChannel.invokeMapMethod<String, dynamic>(
         'runImageDescription',
+        <String, dynamic>{'imageId': _selectedImageDescriptionTestImageId},
       );
       stopwatch.stop();
 
@@ -1405,8 +1449,7 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
 
       setState(() {
         _imageDescriptionElapsedMilliseconds = stopwatch.elapsedMilliseconds;
-        _imageDescriptionError =
-            'Unexpected image-description error: $error';
+        _imageDescriptionError = 'Unexpected image-description error: $error';
       });
     } finally {
       if (mounted) {
@@ -1844,9 +1887,7 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
 
         case 'progress':
           _proofreadingStatus = 'DOWNLOADING';
-          _proofreadingDownloadedBytes = _readInteger(
-            event['downloadedBytes'],
-          );
+          _proofreadingDownloadedBytes = _readInteger(event['downloadedBytes']);
           _proofreadingTotalBytes =
               _readInteger(event['totalBytes']) ?? _proofreadingTotalBytes;
           _proofreadingDownloadMessage = 'Downloading proofreading assets…';
@@ -1857,8 +1898,7 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
           _proofreadingDescription =
               'The dedicated Proofreading API is ready to use.';
           _proofreadingDownloadedBytes =
-              _readInteger(event['downloadedBytes']) ??
-              _proofreadingTotalBytes;
+              _readInteger(event['downloadedBytes']) ?? _proofreadingTotalBytes;
           _proofreadingTotalBytes =
               _readInteger(event['totalBytes']) ?? _proofreadingTotalBytes;
           _proofreadingDownloadMessage =
@@ -1904,8 +1944,7 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
             event['downloadedBytes'],
           );
           _imageDescriptionTotalBytes =
-              _readInteger(event['totalBytes']) ??
-              _imageDescriptionTotalBytes;
+              _readInteger(event['totalBytes']) ?? _imageDescriptionTotalBytes;
           _imageDescriptionDownloadMessage =
               'Downloading image-description assets…';
           break;
@@ -1918,8 +1957,7 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
               _readInteger(event['downloadedBytes']) ??
               _imageDescriptionTotalBytes;
           _imageDescriptionTotalBytes =
-              _readInteger(event['totalBytes']) ??
-              _imageDescriptionTotalBytes;
+              _readInteger(event['totalBytes']) ?? _imageDescriptionTotalBytes;
           _imageDescriptionDownloadMessage =
               'Image-description download completed successfully.';
           _imageDescriptionError = null;
@@ -2342,10 +2380,16 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
         candidateCount != null && candidateCount >= 1 && candidateCount <= 8;
     final hasValidSummarizationInput =
         _summarizationController.text.length > 400;
-    final hasValidRewritingInput =
-        _rewritingController.text.trim().isNotEmpty;
-    final hasValidProofreadingInput =
-        _proofreadingController.text.trim().isNotEmpty;
+    final hasValidRewritingInput = _rewritingController.text.trim().isNotEmpty;
+    final hasValidProofreadingInput = _proofreadingController.text
+        .trim()
+        .isNotEmpty;
+    final imageDescriptionAspectRatio =
+        _imageDescriptionTestImageWidth != null &&
+            _imageDescriptionTestImageHeight != null &&
+            _imageDescriptionTestImageHeight! > 0
+        ? _imageDescriptionTestImageWidth! / _imageDescriptionTestImageHeight!
+        : 3 / 2;
 
     double? progress;
     double? summarizationProgress;
@@ -2369,10 +2413,9 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
     if (_rewritingDownloadedBytes != null &&
         _rewritingTotalBytes != null &&
         _rewritingTotalBytes! > 0) {
-      rewritingProgress =
-          (_rewritingDownloadedBytes! / _rewritingTotalBytes!)
-              .clamp(0.0, 1.0)
-              .toDouble();
+      rewritingProgress = (_rewritingDownloadedBytes! / _rewritingTotalBytes!)
+          .clamp(0.0, 1.0)
+          .toDouble();
     }
 
     if (_proofreadingDownloadedBytes != null &&
@@ -2388,8 +2431,7 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
         _imageDescriptionTotalBytes != null &&
         _imageDescriptionTotalBytes! > 0) {
       imageDescriptionProgress =
-          (_imageDescriptionDownloadedBytes! /
-                  _imageDescriptionTotalBytes!)
+          (_imageDescriptionDownloadedBytes! / _imageDescriptionTotalBytes!)
               .clamp(0.0, 1.0)
               .toDouble();
     }
@@ -3206,9 +3248,7 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
                       )
                     : const Icon(Icons.edit_note),
                 label: Text(
-                  _isCheckingRewriting
-                      ? 'Checking…'
-                      : 'Check rewriting status',
+                  _isCheckingRewriting ? 'Checking…' : 'Check rewriting status',
                 ),
               ),
               if (_rewritingStatus == 'DOWNLOADABLE') ...[
@@ -3606,9 +3646,9 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
               ),
               const SizedBox(height: 12),
               const Text(
-                'Uses the ML Kit Image Description API with one fixed, locally '
-                'generated 768×512 scene. The API returns one short English '
-                'description.',
+                'Uses the ML Kit Image Description API with two fixed local '
+                'images: a controlled synthetic scene and a real tabletop '
+                'photo. The API returns one short English description.',
               ),
               const SizedBox(height: 20),
               Card(
@@ -3719,8 +3759,22 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        LinearProgressIndicator(value: imageDescriptionProgress),
-                        const SizedBox(height: 12),
+                        if (_imageDescriptionStatus == 'DOWNLOADING' ||
+                            _isStartingImageDescriptionDownload) ...[
+                          LinearProgressIndicator(
+                            value: imageDescriptionProgress,
+                          ),
+                          const SizedBox(height: 12),
+                        ] else if (_imageDescriptionStatus == 'AVAILABLE') ...[
+                          const Align(
+                            alignment: Alignment.centerLeft,
+                            child: Icon(
+                              Icons.check_circle,
+                              color: Colors.green,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                        ],
                         Text(_imageDescriptionDownloadMessage!),
                         if (_imageDescriptionDownloadedBytes != null) ...[
                           const SizedBox(height: 8),
@@ -3740,7 +3794,35 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
                 ),
               ],
               const SizedBox(height: 24),
-              const Text('Fixed test image:'),
+              DropdownButtonFormField<String>(
+                initialValue: _selectedImageDescriptionTestImageId,
+                decoration: const InputDecoration(
+                  border: OutlineInputBorder(),
+                  labelText: 'Test image',
+                ),
+                items: const [
+                  DropdownMenuItem(
+                    value: _syntheticImageDescriptionTestImageId,
+                    child: Text('Synthetic house scene'),
+                  ),
+                  DropdownMenuItem(
+                    value: _realPhotoImageDescriptionTestImageId,
+                    child: Text('Real tabletop photo'),
+                  ),
+                ],
+                onChanged:
+                    _isRunningImageDescription ||
+                        _isLoadingImageDescriptionTestImage
+                    ? null
+                    : (value) {
+                        if (value != null &&
+                            value != _selectedImageDescriptionTestImageId) {
+                          _selectImageDescriptionTestImage(value);
+                        }
+                      },
+              ),
+              const SizedBox(height: 24),
+              const Text('Selected fixed test image:'),
               const SizedBox(height: 12),
               Card(
                 clipBehavior: Clip.antiAlias,
@@ -3750,7 +3832,7 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
                         child: Center(child: CircularProgressIndicator()),
                       )
                     : AspectRatio(
-                        aspectRatio: 3 / 2,
+                        aspectRatio: imageDescriptionAspectRatio,
                         child: Image.memory(
                           _imageDescriptionTestImageBytes!,
                           fit: BoxFit.contain,
@@ -3769,6 +3851,7 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
                 onPressed:
                     _imageDescriptionStatus == 'AVAILABLE' &&
                         _imageDescriptionTestImageBytes != null &&
+                        !_isLoadingImageDescriptionTestImage &&
                         !_isRunningImageDescription &&
                         !_isRunningPrompt &&
                         !_isRunningSummarization &&
@@ -3785,7 +3868,7 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
                 label: Text(
                   _isRunningImageDescription
                       ? 'Describing image…'
-                      : 'Describe fixed image',
+                      : 'Describe selected image',
                 ),
               ),
               const SizedBox(height: 16),

@@ -19,5 +19,7 @@ void main() {
     expect(find.text('Check proofreading status'), findsOneWidget);
     expect(find.text('Dedicated image description test'), findsOneWidget);
     expect(find.text('Check image description status'), findsOneWidget);
+    expect(find.text('Test image'), findsOneWidget);
+    expect(find.text('Synthetic house scene'), findsWidgets);
   });
 }
