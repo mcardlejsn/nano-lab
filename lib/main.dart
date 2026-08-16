@@ -87,6 +87,18 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
     'com.mycarejournals.nano_lab/summarization_download_events',
   );
 
+  static const _rewritingDownloadChannel = EventChannel(
+    'com.mycarejournals.nano_lab/rewriting_download_events',
+  );
+
+  static const _proofreadingDownloadChannel = EventChannel(
+    'com.mycarejournals.nano_lab/proofreading_download_events',
+  );
+
+  static const _imageDescriptionDownloadChannel = EventChannel(
+    'com.mycarejournals.nano_lab/image_description_download_events',
+  );
+
   static const _defaultPrompt =
       'Write exactly three short sentences about a fictional robot learning '
       'to garden.';
@@ -127,6 +139,15 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
       'the trial to continue. The town council will review the program on '
       'October 12, 2026, before deciding whether to fund it permanently.';
 
+  static const _defaultRewritingText =
+      'hey sam, the fictional Alder Cove tool library opens Tuesday at 4:00 '
+      'PM, and the town council votes on permanent funding October 12, 2026. '
+      'please send me the inventory list by Friday so I can check it.';
+
+  static const _defaultProofreadingText =
+      'the fictional Northbridge office recieve 17 packages on Monday, but '
+      'three was labeld incorrect and needs to be checked by Friday.';
+
   late final TextEditingController _promptController;
   late final TextEditingController _systemInstructionController;
   late final TextEditingController _maxOutputTokensController;
@@ -134,10 +155,15 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
   late final TextEditingController _topKController;
   late final TextEditingController _candidateCountController;
   late final TextEditingController _summarizationController;
+  late final TextEditingController _rewritingController;
+  late final TextEditingController _proofreadingController;
 
   late final StreamSubscription<dynamic> _downloadSubscription;
   late final StreamSubscription<dynamic> _promptSubscription;
   late final StreamSubscription<dynamic> _summarizationDownloadSubscription;
+  late final StreamSubscription<dynamic> _rewritingDownloadSubscription;
+  late final StreamSubscription<dynamic> _proofreadingDownloadSubscription;
+  late final StreamSubscription<dynamic> _imageDescriptionDownloadSubscription;
 
   bool _isChecking = false;
   bool _isStartingDownload = false;
@@ -145,6 +171,15 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
   bool _isCheckingSummarization = false;
   bool _isStartingSummarizationDownload = false;
   bool _isRunningSummarization = false;
+  bool _isCheckingRewriting = false;
+  bool _isStartingRewritingDownload = false;
+  bool _isRunningRewriting = false;
+  bool _isCheckingProofreading = false;
+  bool _isStartingProofreadingDownload = false;
+  bool _isRunningProofreading = false;
+  bool _isCheckingImageDescription = false;
+  bool _isStartingImageDescriptionDownload = false;
+  bool _isRunningImageDescription = false;
   bool _systemInstructionAvailable = false;
   double _temperature = 0.0;
   String _modelReleaseStage = 'STABLE';
@@ -193,6 +228,44 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
   int? _summarizationTotalBytes;
   int? _summarizationElapsedMilliseconds;
 
+  String _rewritingStatus = 'NOT CHECKED';
+  String _rewritingDescription =
+      'Check whether the dedicated ML Kit Rewriting API is available.';
+  String? _rewritingError;
+  String? _rewritingDownloadMessage;
+  String? _submittedRewritingInput;
+  String _rewritingOutput = '';
+  int? _rewritingDownloadedBytes;
+  int? _rewritingTotalBytes;
+  int? _rewritingElapsedMilliseconds;
+  int? _rewritingSuggestionCount;
+
+  String _proofreadingStatus = 'NOT CHECKED';
+  String _proofreadingDescription =
+      'Check whether the dedicated ML Kit Proofreading API is available.';
+  String? _proofreadingError;
+  String? _proofreadingDownloadMessage;
+  String? _submittedProofreadingInput;
+  String _proofreadingOutput = '';
+  int? _proofreadingDownloadedBytes;
+  int? _proofreadingTotalBytes;
+  int? _proofreadingElapsedMilliseconds;
+  int? _proofreadingSuggestionCount;
+
+  String _imageDescriptionStatus = 'NOT CHECKED';
+  String _imageDescriptionDescription =
+      'Check whether the dedicated ML Kit Image Description API is available.';
+  String? _imageDescriptionError;
+  String? _imageDescriptionDownloadMessage;
+  Uint8List? _imageDescriptionTestImageBytes;
+  String? _imageDescriptionTestImageId;
+  int? _imageDescriptionTestImageWidth;
+  int? _imageDescriptionTestImageHeight;
+  String _imageDescriptionOutput = '';
+  int? _imageDescriptionDownloadedBytes;
+  int? _imageDescriptionTotalBytes;
+  int? _imageDescriptionElapsedMilliseconds;
+
   @override
   void initState() {
     super.initState();
@@ -207,6 +280,10 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
     _candidateCountController = TextEditingController(text: '1');
     _summarizationController = TextEditingController(
       text: _defaultSummarizationText,
+    );
+    _rewritingController = TextEditingController(text: _defaultRewritingText);
+    _proofreadingController = TextEditingController(
+      text: _defaultProofreadingText,
     );
 
     _downloadSubscription = _downloadChannel.receiveBroadcastStream().listen(
@@ -225,6 +302,29 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
           _handleSummarizationDownloadEvent,
           onError: _handleSummarizationDownloadStreamError,
         );
+
+    _rewritingDownloadSubscription = _rewritingDownloadChannel
+        .receiveBroadcastStream()
+        .listen(
+          _handleRewritingDownloadEvent,
+          onError: _handleRewritingDownloadStreamError,
+        );
+
+    _proofreadingDownloadSubscription = _proofreadingDownloadChannel
+        .receiveBroadcastStream()
+        .listen(
+          _handleProofreadingDownloadEvent,
+          onError: _handleProofreadingDownloadStreamError,
+        );
+
+    _imageDescriptionDownloadSubscription = _imageDescriptionDownloadChannel
+        .receiveBroadcastStream()
+        .listen(
+          _handleImageDescriptionDownloadEvent,
+          onError: _handleImageDescriptionDownloadStreamError,
+        );
+
+    _loadImageDescriptionTestImage();
   }
 
   @override
@@ -232,6 +332,9 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
     _downloadSubscription.cancel();
     _promptSubscription.cancel();
     _summarizationDownloadSubscription.cancel();
+    _rewritingDownloadSubscription.cancel();
+    _proofreadingDownloadSubscription.cancel();
+    _imageDescriptionDownloadSubscription.cancel();
     _promptController.dispose();
     _systemInstructionController.dispose();
     _maxOutputTokensController.dispose();
@@ -239,6 +342,8 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
     _topKController.dispose();
     _candidateCountController.dispose();
     _summarizationController.dispose();
+    _rewritingController.dispose();
+    _proofreadingController.dispose();
     super.dispose();
   }
 
@@ -653,6 +758,665 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
     }
   }
 
+  Future<void> _checkRewritingStatus() async {
+    setState(() {
+      _isCheckingRewriting = true;
+      _rewritingStatus = 'CHECKING';
+      _rewritingDescription =
+          'Checking the dedicated Rewriting API configuration…';
+      _rewritingError = null;
+    });
+
+    try {
+      final result = await _nativeChannel.invokeMapMethod<String, dynamic>(
+        'getRewritingStatus',
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      if (result == null) {
+        setState(() {
+          _rewritingStatus = 'ERROR';
+          _rewritingDescription =
+              'Kotlin returned no rewriting status information.';
+        });
+        return;
+      }
+
+      setState(() {
+        _rewritingStatus = result['status']?.toString() ?? 'UNKNOWN';
+        _rewritingDescription =
+            result['description']?.toString() ??
+            'No rewriting status description was returned.';
+      });
+    } on PlatformException catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _rewritingStatus = 'ERROR';
+        _rewritingDescription =
+            error.message ?? 'Rewriting status detection failed.';
+        _rewritingError = 'Platform error: ${error.code}';
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _rewritingStatus = 'ERROR';
+        _rewritingDescription = 'Unexpected rewriting status-check failure.';
+        _rewritingError = error.toString();
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isCheckingRewriting = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _startRewritingDownload() async {
+    setState(() {
+      _isStartingRewritingDownload = true;
+      _rewritingDownloadMessage =
+          'Requesting the rewriting asset download…';
+      _rewritingDownloadedBytes = null;
+      _rewritingTotalBytes = null;
+      _rewritingError = null;
+    });
+
+    try {
+      await _nativeChannel.invokeMethod<dynamic>('startRewritingDownload');
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _rewritingStatus = 'DOWNLOADING';
+        _rewritingDescription =
+            'The required rewriting assets are downloading.';
+      });
+    } on PlatformException catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _rewritingDownloadMessage = null;
+        _rewritingError =
+            '${error.message ?? 'The rewriting download could not be started.'}\n'
+            'Platform error: ${error.code}';
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _rewritingDownloadMessage = null;
+        _rewritingError = 'Unexpected rewriting download error: $error';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isStartingRewritingDownload = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _runRewriting() async {
+    final input = _rewritingController.text;
+    final stopwatch = Stopwatch()..start();
+
+    setState(() {
+      _isRunningRewriting = true;
+      _submittedRewritingInput = input;
+      _rewritingOutput = '';
+      _rewritingElapsedMilliseconds = null;
+      _rewritingSuggestionCount = null;
+      _rewritingError = null;
+    });
+
+    try {
+      final result = await _nativeChannel.invokeMapMethod<String, dynamic>(
+        'runRewriting',
+        <String, dynamic>{'text': input},
+      );
+      stopwatch.stop();
+
+      if (!mounted) {
+        return;
+      }
+
+      if (result == null) {
+        setState(() {
+          _rewritingElapsedMilliseconds = stopwatch.elapsedMilliseconds;
+          _rewritingError = 'Kotlin returned no rewriting result.';
+        });
+        return;
+      }
+
+      final nativeInput = result['input']?.toString();
+      if (nativeInput != input) {
+        setState(() {
+          _rewritingElapsedMilliseconds = stopwatch.elapsedMilliseconds;
+          _rewritingError =
+              'The native rewriting input did not match the displayed input.';
+        });
+        return;
+      }
+
+      setState(() {
+        _rewritingOutput = result['output']?.toString() ?? '';
+        _rewritingSuggestionCount = _readInteger(result['suggestionCount']);
+        _rewritingElapsedMilliseconds =
+            _readInteger(result['elapsedMilliseconds']) ??
+            stopwatch.elapsedMilliseconds;
+      });
+    } on PlatformException catch (error) {
+      stopwatch.stop();
+
+      if (!mounted) {
+        return;
+      }
+
+      final details = error.details;
+      final nativeElapsedMilliseconds = details is Map
+          ? _readInteger(details['elapsedMilliseconds'])
+          : null;
+
+      setState(() {
+        _rewritingElapsedMilliseconds =
+            nativeElapsedMilliseconds ?? stopwatch.elapsedMilliseconds;
+        _rewritingError =
+            '${error.message ?? 'Gemini Nano rewriting failed.'}\n'
+            'Platform error: ${error.code}';
+      });
+    } catch (error) {
+      stopwatch.stop();
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _rewritingElapsedMilliseconds = stopwatch.elapsedMilliseconds;
+        _rewritingError = 'Unexpected rewriting error: $error';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isRunningRewriting = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _checkProofreadingStatus() async {
+    setState(() {
+      _isCheckingProofreading = true;
+      _proofreadingStatus = 'CHECKING';
+      _proofreadingDescription =
+          'Checking the dedicated Proofreading API configuration…';
+      _proofreadingError = null;
+    });
+
+    try {
+      final result = await _nativeChannel.invokeMapMethod<String, dynamic>(
+        'getProofreadingStatus',
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      if (result == null) {
+        setState(() {
+          _proofreadingStatus = 'ERROR';
+          _proofreadingDescription =
+              'Kotlin returned no proofreading status information.';
+        });
+        return;
+      }
+
+      setState(() {
+        _proofreadingStatus = result['status']?.toString() ?? 'UNKNOWN';
+        _proofreadingDescription =
+            result['description']?.toString() ??
+            'No proofreading status description was returned.';
+      });
+    } on PlatformException catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _proofreadingStatus = 'ERROR';
+        _proofreadingDescription =
+            error.message ?? 'Proofreading status detection failed.';
+        _proofreadingError = 'Platform error: ${error.code}';
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _proofreadingStatus = 'ERROR';
+        _proofreadingDescription =
+            'Unexpected proofreading status-check failure.';
+        _proofreadingError = error.toString();
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isCheckingProofreading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _startProofreadingDownload() async {
+    setState(() {
+      _isStartingProofreadingDownload = true;
+      _proofreadingDownloadMessage =
+          'Requesting the proofreading asset download…';
+      _proofreadingDownloadedBytes = null;
+      _proofreadingTotalBytes = null;
+      _proofreadingError = null;
+    });
+
+    try {
+      await _nativeChannel.invokeMethod<dynamic>('startProofreadingDownload');
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _proofreadingStatus = 'DOWNLOADING';
+        _proofreadingDescription =
+            'The required proofreading assets are downloading.';
+      });
+    } on PlatformException catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _proofreadingDownloadMessage = null;
+        _proofreadingError =
+            '${error.message ?? 'The proofreading download could not be started.'}\n'
+            'Platform error: ${error.code}';
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _proofreadingDownloadMessage = null;
+        _proofreadingError = 'Unexpected proofreading download error: $error';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isStartingProofreadingDownload = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _runProofreading() async {
+    final input = _proofreadingController.text;
+    final stopwatch = Stopwatch()..start();
+
+    setState(() {
+      _isRunningProofreading = true;
+      _submittedProofreadingInput = input;
+      _proofreadingOutput = '';
+      _proofreadingElapsedMilliseconds = null;
+      _proofreadingSuggestionCount = null;
+      _proofreadingError = null;
+    });
+
+    try {
+      final result = await _nativeChannel.invokeMapMethod<String, dynamic>(
+        'runProofreading',
+        <String, dynamic>{'text': input},
+      );
+      stopwatch.stop();
+
+      if (!mounted) {
+        return;
+      }
+
+      if (result == null) {
+        setState(() {
+          _proofreadingElapsedMilliseconds = stopwatch.elapsedMilliseconds;
+          _proofreadingError = 'Kotlin returned no proofreading result.';
+        });
+        return;
+      }
+
+      final nativeInput = result['input']?.toString();
+      if (nativeInput != input) {
+        setState(() {
+          _proofreadingElapsedMilliseconds = stopwatch.elapsedMilliseconds;
+          _proofreadingError =
+              'The native proofreading input did not match the displayed input.';
+        });
+        return;
+      }
+
+      setState(() {
+        _proofreadingOutput = result['output']?.toString() ?? '';
+        _proofreadingSuggestionCount = _readInteger(result['suggestionCount']);
+        _proofreadingElapsedMilliseconds =
+            _readInteger(result['elapsedMilliseconds']) ??
+            stopwatch.elapsedMilliseconds;
+      });
+    } on PlatformException catch (error) {
+      stopwatch.stop();
+
+      if (!mounted) {
+        return;
+      }
+
+      final details = error.details;
+      final nativeElapsedMilliseconds = details is Map
+          ? _readInteger(details['elapsedMilliseconds'])
+          : null;
+
+      setState(() {
+        _proofreadingElapsedMilliseconds =
+            nativeElapsedMilliseconds ?? stopwatch.elapsedMilliseconds;
+        _proofreadingError =
+            '${error.message ?? 'Gemini Nano proofreading failed.'}\n'
+            'Platform error: ${error.code}';
+      });
+    } catch (error) {
+      stopwatch.stop();
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _proofreadingElapsedMilliseconds = stopwatch.elapsedMilliseconds;
+        _proofreadingError = 'Unexpected proofreading error: $error';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isRunningProofreading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _loadImageDescriptionTestImage() async {
+    try {
+      final result = await _nativeChannel.invokeMapMethod<String, dynamic>(
+        'getImageDescriptionTestImage',
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      final imageBytes = result?['imageBytes'];
+      if (result == null || imageBytes is! Uint8List) {
+        setState(() {
+          _imageDescriptionError =
+              'Kotlin returned no valid image-description test image.';
+        });
+        return;
+      }
+
+      setState(() {
+        _imageDescriptionTestImageBytes = imageBytes;
+        _imageDescriptionTestImageId = result['imageId']?.toString();
+        _imageDescriptionTestImageWidth = _readInteger(result['width']);
+        _imageDescriptionTestImageHeight = _readInteger(result['height']);
+      });
+    } on PlatformException catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _imageDescriptionError =
+            '${error.message ?? 'The fixed image-description test scene could not be loaded.'}\n'
+            'Platform error: ${error.code}';
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _imageDescriptionError =
+            'Unexpected image-description test-image error: $error';
+      });
+    }
+  }
+
+  Future<void> _checkImageDescriptionStatus() async {
+    setState(() {
+      _isCheckingImageDescription = true;
+      _imageDescriptionStatus = 'CHECKING';
+      _imageDescriptionDescription =
+          'Checking the dedicated Image Description API configuration…';
+      _imageDescriptionError = null;
+    });
+
+    try {
+      final result = await _nativeChannel.invokeMapMethod<String, dynamic>(
+        'getImageDescriptionStatus',
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      if (result == null) {
+        setState(() {
+          _imageDescriptionStatus = 'ERROR';
+          _imageDescriptionDescription =
+              'Kotlin returned no image-description status information.';
+        });
+        return;
+      }
+
+      setState(() {
+        _imageDescriptionStatus = result['status']?.toString() ?? 'UNKNOWN';
+        _imageDescriptionDescription =
+            result['description']?.toString() ??
+            'No image-description status description was returned.';
+      });
+    } on PlatformException catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _imageDescriptionStatus = 'ERROR';
+        _imageDescriptionDescription =
+            error.message ?? 'Image-description status detection failed.';
+        _imageDescriptionError = 'Platform error: ${error.code}';
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _imageDescriptionStatus = 'ERROR';
+        _imageDescriptionDescription =
+            'Unexpected image-description status-check failure.';
+        _imageDescriptionError = error.toString();
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isCheckingImageDescription = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _startImageDescriptionDownload() async {
+    setState(() {
+      _isStartingImageDescriptionDownload = true;
+      _imageDescriptionDownloadMessage =
+          'Requesting the image-description asset download…';
+      _imageDescriptionDownloadedBytes = null;
+      _imageDescriptionTotalBytes = null;
+      _imageDescriptionError = null;
+    });
+
+    try {
+      await _nativeChannel.invokeMethod<dynamic>(
+        'startImageDescriptionDownload',
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _imageDescriptionStatus = 'DOWNLOADING';
+        _imageDescriptionDescription =
+            'The required image-description assets are downloading.';
+      });
+    } on PlatformException catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _imageDescriptionDownloadMessage = null;
+        _imageDescriptionError =
+            '${error.message ?? 'The image-description download could not be started.'}\n'
+            'Platform error: ${error.code}';
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _imageDescriptionDownloadMessage = null;
+        _imageDescriptionError =
+            'Unexpected image-description download error: $error';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isStartingImageDescriptionDownload = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _runImageDescription() async {
+    final stopwatch = Stopwatch()..start();
+
+    setState(() {
+      _isRunningImageDescription = true;
+      _imageDescriptionOutput = '';
+      _imageDescriptionElapsedMilliseconds = null;
+      _imageDescriptionError = null;
+    });
+
+    try {
+      final result = await _nativeChannel.invokeMapMethod<String, dynamic>(
+        'runImageDescription',
+      );
+      stopwatch.stop();
+
+      if (!mounted) {
+        return;
+      }
+
+      if (result == null) {
+        setState(() {
+          _imageDescriptionElapsedMilliseconds = stopwatch.elapsedMilliseconds;
+          _imageDescriptionError =
+              'Kotlin returned no image-description result.';
+        });
+        return;
+      }
+
+      final nativeImageId = result['imageId']?.toString();
+      final nativeWidth = _readInteger(result['width']);
+      final nativeHeight = _readInteger(result['height']);
+      if (nativeImageId != _imageDescriptionTestImageId ||
+          nativeWidth != _imageDescriptionTestImageWidth ||
+          nativeHeight != _imageDescriptionTestImageHeight) {
+        setState(() {
+          _imageDescriptionElapsedMilliseconds = stopwatch.elapsedMilliseconds;
+          _imageDescriptionError =
+              'The native inference image did not match the displayed test image.';
+        });
+        return;
+      }
+
+      setState(() {
+        _imageDescriptionOutput = result['output']?.toString() ?? '';
+        _imageDescriptionElapsedMilliseconds =
+            _readInteger(result['elapsedMilliseconds']) ??
+            stopwatch.elapsedMilliseconds;
+      });
+    } on PlatformException catch (error) {
+      stopwatch.stop();
+
+      if (!mounted) {
+        return;
+      }
+
+      final details = error.details;
+      final nativeElapsedMilliseconds = details is Map
+          ? _readInteger(details['elapsedMilliseconds'])
+          : null;
+
+      setState(() {
+        _imageDescriptionElapsedMilliseconds =
+            nativeElapsedMilliseconds ?? stopwatch.elapsedMilliseconds;
+        _imageDescriptionError =
+            '${error.message ?? 'Gemini Nano image description failed.'}\n'
+            'Platform error: ${error.code}';
+      });
+    } catch (error) {
+      stopwatch.stop();
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _imageDescriptionElapsedMilliseconds = stopwatch.elapsedMilliseconds;
+        _imageDescriptionError =
+            'Unexpected image-description error: $error';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isRunningImageDescription = false;
+        });
+      }
+    }
+  }
+
   Future<void> _runPrompt({_PromptRun? repeatRun}) async {
     final prompt = repeatRun?.prompt ?? _promptController.text;
     final systemInstruction = repeatRun == null
@@ -1008,6 +1772,172 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
     });
   }
 
+  void _handleRewritingDownloadEvent(dynamic event) {
+    if (!mounted || event is! Map) {
+      return;
+    }
+
+    final eventName = event['event']?.toString();
+
+    setState(() {
+      switch (eventName) {
+        case 'started':
+          _rewritingStatus = 'DOWNLOADING';
+          _rewritingDescription =
+              'The required rewriting assets are downloading.';
+          _rewritingTotalBytes = _readInteger(event['totalBytes']);
+          _rewritingDownloadedBytes = 0;
+          _rewritingDownloadMessage = 'Rewriting download started.';
+          break;
+
+        case 'progress':
+          _rewritingStatus = 'DOWNLOADING';
+          _rewritingDownloadedBytes = _readInteger(event['downloadedBytes']);
+          _rewritingTotalBytes =
+              _readInteger(event['totalBytes']) ?? _rewritingTotalBytes;
+          _rewritingDownloadMessage = 'Downloading rewriting assets…';
+          break;
+
+        case 'completed':
+          _rewritingStatus = 'AVAILABLE';
+          _rewritingDescription =
+              'The dedicated Rewriting API is ready to use.';
+          _rewritingDownloadedBytes =
+              _readInteger(event['downloadedBytes']) ?? _rewritingTotalBytes;
+          _rewritingTotalBytes =
+              _readInteger(event['totalBytes']) ?? _rewritingTotalBytes;
+          _rewritingDownloadMessage =
+              'Rewriting download completed successfully.';
+          _rewritingError = null;
+          break;
+
+        case 'failed':
+          _rewritingStatus = 'DOWNLOADABLE';
+          _rewritingDescription =
+              'This device supports rewriting, but its assets are not ready.';
+          _rewritingDownloadMessage = null;
+          _rewritingError =
+              '${event['message'] ?? 'Rewriting asset download failed.'}\n'
+              'GenAI error code: ${event['errorCode'] ?? 'unknown'}';
+          break;
+      }
+    });
+  }
+
+  void _handleProofreadingDownloadEvent(dynamic event) {
+    if (!mounted || event is! Map) {
+      return;
+    }
+
+    final eventName = event['event']?.toString();
+
+    setState(() {
+      switch (eventName) {
+        case 'started':
+          _proofreadingStatus = 'DOWNLOADING';
+          _proofreadingDescription =
+              'The required proofreading assets are downloading.';
+          _proofreadingTotalBytes = _readInteger(event['totalBytes']);
+          _proofreadingDownloadedBytes = 0;
+          _proofreadingDownloadMessage = 'Proofreading download started.';
+          break;
+
+        case 'progress':
+          _proofreadingStatus = 'DOWNLOADING';
+          _proofreadingDownloadedBytes = _readInteger(
+            event['downloadedBytes'],
+          );
+          _proofreadingTotalBytes =
+              _readInteger(event['totalBytes']) ?? _proofreadingTotalBytes;
+          _proofreadingDownloadMessage = 'Downloading proofreading assets…';
+          break;
+
+        case 'completed':
+          _proofreadingStatus = 'AVAILABLE';
+          _proofreadingDescription =
+              'The dedicated Proofreading API is ready to use.';
+          _proofreadingDownloadedBytes =
+              _readInteger(event['downloadedBytes']) ??
+              _proofreadingTotalBytes;
+          _proofreadingTotalBytes =
+              _readInteger(event['totalBytes']) ?? _proofreadingTotalBytes;
+          _proofreadingDownloadMessage =
+              'Proofreading download completed successfully.';
+          _proofreadingError = null;
+          break;
+
+        case 'failed':
+          _proofreadingStatus = 'DOWNLOADABLE';
+          _proofreadingDescription =
+              'This device supports proofreading, but its assets are not ready.';
+          _proofreadingDownloadMessage = null;
+          _proofreadingError =
+              '${event['message'] ?? 'Proofreading asset download failed.'}\n'
+              'GenAI error code: ${event['errorCode'] ?? 'unknown'}';
+          break;
+      }
+    });
+  }
+
+  void _handleImageDescriptionDownloadEvent(dynamic event) {
+    if (!mounted || event is! Map) {
+      return;
+    }
+
+    final eventName = event['event']?.toString();
+
+    setState(() {
+      switch (eventName) {
+        case 'started':
+          _imageDescriptionStatus = 'DOWNLOADING';
+          _imageDescriptionDescription =
+              'The required image-description assets are downloading.';
+          _imageDescriptionTotalBytes = _readInteger(event['totalBytes']);
+          _imageDescriptionDownloadedBytes = 0;
+          _imageDescriptionDownloadMessage =
+              'Image-description download started.';
+          break;
+
+        case 'progress':
+          _imageDescriptionStatus = 'DOWNLOADING';
+          _imageDescriptionDownloadedBytes = _readInteger(
+            event['downloadedBytes'],
+          );
+          _imageDescriptionTotalBytes =
+              _readInteger(event['totalBytes']) ??
+              _imageDescriptionTotalBytes;
+          _imageDescriptionDownloadMessage =
+              'Downloading image-description assets…';
+          break;
+
+        case 'completed':
+          _imageDescriptionStatus = 'AVAILABLE';
+          _imageDescriptionDescription =
+              'The dedicated Image Description API is ready to use.';
+          _imageDescriptionDownloadedBytes =
+              _readInteger(event['downloadedBytes']) ??
+              _imageDescriptionTotalBytes;
+          _imageDescriptionTotalBytes =
+              _readInteger(event['totalBytes']) ??
+              _imageDescriptionTotalBytes;
+          _imageDescriptionDownloadMessage =
+              'Image-description download completed successfully.';
+          _imageDescriptionError = null;
+          break;
+
+        case 'failed':
+          _imageDescriptionStatus = 'DOWNLOADABLE';
+          _imageDescriptionDescription =
+              'This device supports image description, but its assets are not ready.';
+          _imageDescriptionDownloadMessage = null;
+          _imageDescriptionError =
+              '${event['message'] ?? 'Image-description asset download failed.'}\n'
+              'GenAI error code: ${event['errorCode'] ?? 'unknown'}';
+          break;
+      }
+    });
+  }
+
   void _handlePromptEvent(dynamic event) {
     if (!mounted || event is! Map) {
       return;
@@ -1166,6 +2096,41 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
     });
   }
 
+  void _handleRewritingDownloadStreamError(Object error) {
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _rewritingDownloadMessage = null;
+      _rewritingError = 'Rewriting download progress stream error: $error';
+    });
+  }
+
+  void _handleProofreadingDownloadStreamError(Object error) {
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _proofreadingDownloadMessage = null;
+      _proofreadingError =
+          'Proofreading download progress stream error: $error';
+    });
+  }
+
+  void _handleImageDescriptionDownloadStreamError(Object error) {
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _imageDescriptionDownloadMessage = null;
+      _imageDescriptionError =
+          'Image-description download progress stream error: $error';
+    });
+  }
+
   int? _readInteger(dynamic value) {
     return value is int ? value : null;
   }
@@ -1203,6 +2168,55 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
         return Colors.orange;
       case 'DOWNLOADING':
         return Colors.blue;
+      case 'UNAVAILABLE':
+      case 'ERROR':
+        return colors.error;
+      default:
+        return colors.outline;
+    }
+  }
+
+  Color _rewritingStatusColor(ColorScheme colors) {
+    switch (_rewritingStatus) {
+      case 'AVAILABLE':
+        return Colors.green;
+      case 'DOWNLOADABLE':
+        return Colors.orange;
+      case 'DOWNLOADING':
+        return Colors.blue;
+      case 'UNAVAILABLE':
+      case 'ERROR':
+        return colors.error;
+      default:
+        return colors.outline;
+    }
+  }
+
+  Color _proofreadingStatusColor(ColorScheme colors) {
+    switch (_proofreadingStatus) {
+      case 'AVAILABLE':
+        return Colors.green;
+      case 'DOWNLOADABLE':
+        return Colors.orange;
+      case 'DOWNLOADING':
+        return Colors.blue;
+      case 'UNAVAILABLE':
+      case 'ERROR':
+        return colors.error;
+      default:
+        return colors.outline;
+    }
+  }
+
+  Color _imageDescriptionStatusColor(ColorScheme colors) {
+    switch (_imageDescriptionStatus) {
+      case 'AVAILABLE':
+        return Colors.green;
+      case 'DOWNLOADABLE':
+        return Colors.orange;
+      case 'DOWNLOADING':
+      case 'CHECKING':
+        return colors.primary;
       case 'UNAVAILABLE':
       case 'ERROR':
         return colors.error;
@@ -1311,6 +2325,9 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
     final colors = Theme.of(context).colorScheme;
     final statusColor = _statusColor(colors);
     final summarizationStatusColor = _summarizationStatusColor(colors);
+    final rewritingStatusColor = _rewritingStatusColor(colors);
+    final proofreadingStatusColor = _proofreadingStatusColor(colors);
+    final imageDescriptionStatusColor = _imageDescriptionStatusColor(colors);
     final maxOutputTokens = int.tryParse(_maxOutputTokensController.text);
     final hasValidMaxOutputTokens =
         maxOutputTokens != null &&
@@ -1325,9 +2342,16 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
         candidateCount != null && candidateCount >= 1 && candidateCount <= 8;
     final hasValidSummarizationInput =
         _summarizationController.text.length > 400;
+    final hasValidRewritingInput =
+        _rewritingController.text.trim().isNotEmpty;
+    final hasValidProofreadingInput =
+        _proofreadingController.text.trim().isNotEmpty;
 
     double? progress;
     double? summarizationProgress;
+    double? rewritingProgress;
+    double? proofreadingProgress;
+    double? imageDescriptionProgress;
 
     if (_downloadedBytes != null && _totalBytes != null && _totalBytes! > 0) {
       progress = (_downloadedBytes! / _totalBytes!).clamp(0.0, 1.0).toDouble();
@@ -1338,6 +2362,34 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
         _summarizationTotalBytes! > 0) {
       summarizationProgress =
           (_summarizationDownloadedBytes! / _summarizationTotalBytes!)
+              .clamp(0.0, 1.0)
+              .toDouble();
+    }
+
+    if (_rewritingDownloadedBytes != null &&
+        _rewritingTotalBytes != null &&
+        _rewritingTotalBytes! > 0) {
+      rewritingProgress =
+          (_rewritingDownloadedBytes! / _rewritingTotalBytes!)
+              .clamp(0.0, 1.0)
+              .toDouble();
+    }
+
+    if (_proofreadingDownloadedBytes != null &&
+        _proofreadingTotalBytes != null &&
+        _proofreadingTotalBytes! > 0) {
+      proofreadingProgress =
+          (_proofreadingDownloadedBytes! / _proofreadingTotalBytes!)
+              .clamp(0.0, 1.0)
+              .toDouble();
+    }
+
+    if (_imageDescriptionDownloadedBytes != null &&
+        _imageDescriptionTotalBytes != null &&
+        _imageDescriptionTotalBytes! > 0) {
+      imageDescriptionProgress =
+          (_imageDescriptionDownloadedBytes! /
+                  _imageDescriptionTotalBytes!)
               .clamp(0.0, 1.0)
               .toDouble();
     }
@@ -1375,7 +2427,13 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
                         _isStartingDownload ||
                         _isRunningPrompt ||
                         _isRunningSummarization ||
-                        _isStartingSummarizationDownload
+                        _isStartingSummarizationDownload ||
+                        _isRunningRewriting ||
+                        _isStartingRewritingDownload ||
+                        _isRunningProofreading ||
+                        _isStartingProofreadingDownload ||
+                        _isRunningImageDescription ||
+                        _isStartingImageDescriptionDownload
                     ? null
                     : (value) {
                         if (value != null && value != _modelReleaseStage) {
@@ -1478,7 +2536,13 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
                     _isChecking ||
                         _isStartingDownload ||
                         _isRunningSummarization ||
-                        _isStartingSummarizationDownload
+                        _isStartingSummarizationDownload ||
+                        _isRunningRewriting ||
+                        _isStartingRewritingDownload ||
+                        _isRunningProofreading ||
+                        _isStartingProofreadingDownload ||
+                        _isRunningImageDescription ||
+                        _isStartingImageDescriptionDownload
                     ? null
                     : _checkNanoStatus,
                 icon: _isChecking
@@ -1497,7 +2561,13 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
                   onPressed:
                       _isStartingDownload ||
                           _isStartingSummarizationDownload ||
-                          _isRunningSummarization
+                          _isRunningSummarization ||
+                          _isStartingRewritingDownload ||
+                          _isRunningRewriting ||
+                          _isStartingProofreadingDownload ||
+                          _isRunningProofreading ||
+                          _isStartingImageDescriptionDownload ||
+                          _isRunningImageDescription
                       ? null
                       : _startDownload,
                   icon: _isStartingDownload
@@ -1641,6 +2711,12 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
                     _status == 'AVAILABLE' &&
                         !_isRunningPrompt &&
                         !_isRunningSummarization &&
+                        !_isRunningRewriting &&
+                        !_isStartingRewritingDownload &&
+                        !_isRunningProofreading &&
+                        !_isStartingProofreadingDownload &&
+                        !_isRunningImageDescription &&
+                        !_isStartingImageDescriptionDownload &&
                         hasValidMaxOutputTokens &&
                         hasValidSeed &&
                         hasValidTopK &&
@@ -1661,6 +2737,9 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
                 onPressed:
                     !_isRunningPrompt &&
                         !_isRunningSummarization &&
+                        !_isRunningRewriting &&
+                        !_isRunningProofreading &&
+                        !_isRunningImageDescription &&
                         _completedRuns.isNotEmpty
                     ? () => _runPrompt(repeatRun: _completedRuns.last)
                     : null,
@@ -1881,7 +2960,13 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
                         _isStartingSummarizationDownload ||
                         _isRunningSummarization ||
                         _isRunningPrompt ||
-                        _isStartingDownload
+                        _isStartingDownload ||
+                        _isRunningRewriting ||
+                        _isStartingRewritingDownload ||
+                        _isRunningProofreading ||
+                        _isStartingProofreadingDownload ||
+                        _isRunningImageDescription ||
+                        _isStartingImageDescriptionDownload
                     ? null
                     : _checkSummarizationStatus,
                 icon: _isCheckingSummarization
@@ -1903,7 +2988,13 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
                       _isStartingSummarizationDownload ||
                           _isStartingDownload ||
                           _isRunningPrompt ||
-                          _isRunningSummarization
+                          _isRunningSummarization ||
+                          _isStartingRewritingDownload ||
+                          _isRunningRewriting ||
+                          _isStartingProofreadingDownload ||
+                          _isRunningProofreading ||
+                          _isStartingImageDescriptionDownload ||
+                          _isRunningImageDescription
                       ? null
                       : _startSummarizationDownload,
                   icon: _isStartingSummarizationDownload
@@ -1971,6 +3062,9 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
                     _summarizationStatus == 'AVAILABLE' &&
                         !_isRunningSummarization &&
                         !_isRunningPrompt &&
+                        !_isRunningRewriting &&
+                        !_isRunningProofreading &&
+                        !_isRunningImageDescription &&
                         hasValidSummarizationInput
                     ? _runSummarization
                     : null,
@@ -2032,6 +3126,720 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
                         const SizedBox(height: 16),
                         SelectableText(
                           _summarizationError!,
+                          style: TextStyle(color: colors.error),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 40),
+              Text(
+                'Dedicated rewriting test',
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Uses the ML Kit Rewriting API with fixed English professional '
+                'output. Official input limit: fewer than 256 tokens.',
+              ),
+              const SizedBox(height: 20),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: rewritingStatusColor.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: rewritingStatusColor),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                          child: Text(
+                            _rewritingStatus,
+                            style: TextStyle(
+                              color: rewritingStatusColor,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      SelectableText(_rewritingDescription),
+                      if (_rewritingError != null) ...[
+                        const SizedBox(height: 16),
+                        SelectableText(
+                          _rewritingError!,
+                          style: TextStyle(color: colors.error),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed:
+                    _isCheckingRewriting ||
+                        _isStartingRewritingDownload ||
+                        _isRunningRewriting ||
+                        _isRunningPrompt ||
+                        _isRunningSummarization ||
+                        _isStartingDownload ||
+                        _isStartingSummarizationDownload ||
+                        _isRunningProofreading ||
+                        _isStartingProofreadingDownload ||
+                        _isRunningImageDescription ||
+                        _isStartingImageDescriptionDownload
+                    ? null
+                    : _checkRewritingStatus,
+                icon: _isCheckingRewriting
+                    ? const SizedBox.square(
+                        dimension: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.edit_note),
+                label: Text(
+                  _isCheckingRewriting
+                      ? 'Checking…'
+                      : 'Check rewriting status',
+                ),
+              ),
+              if (_rewritingStatus == 'DOWNLOADABLE') ...[
+                const SizedBox(height: 12),
+                FilledButton.tonalIcon(
+                  onPressed:
+                      _isStartingRewritingDownload ||
+                          _isStartingDownload ||
+                          _isStartingSummarizationDownload ||
+                          _isRunningPrompt ||
+                          _isRunningSummarization ||
+                          _isRunningRewriting ||
+                          _isStartingProofreadingDownload ||
+                          _isRunningProofreading ||
+                          _isStartingImageDescriptionDownload ||
+                          _isRunningImageDescription
+                      ? null
+                      : _startRewritingDownload,
+                  icon: _isStartingRewritingDownload
+                      ? const SizedBox.square(
+                          dimension: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.download),
+                  label: Text(
+                    _isStartingRewritingDownload
+                        ? 'Starting download…'
+                        : 'Download rewriting assets',
+                  ),
+                ),
+              ],
+              if (_rewritingDownloadMessage != null) ...[
+                const SizedBox(height: 16),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        LinearProgressIndicator(value: rewritingProgress),
+                        const SizedBox(height: 12),
+                        Text(_rewritingDownloadMessage!),
+                        if (_rewritingDownloadedBytes != null) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            _rewritingTotalBytes != null &&
+                                    _rewritingTotalBytes! > 0
+                                ? '${_formatBytes(_rewritingDownloadedBytes!)} of '
+                                      '${_formatBytes(_rewritingTotalBytes!)}'
+                                : _formatBytes(_rewritingDownloadedBytes!),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 24),
+              const Text('Text to rewrite:'),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _rewritingController,
+                enabled: !_isRunningRewriting,
+                minLines: 4,
+                maxLines: 8,
+                onChanged: (_) => setState(() {}),
+                decoration: InputDecoration(
+                  border: const OutlineInputBorder(),
+                  helperText:
+                      '${_rewritingController.text.length} characters · keep under 256 tokens',
+                ),
+              ),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed:
+                    _rewritingStatus == 'AVAILABLE' &&
+                        !_isRunningRewriting &&
+                        !_isRunningPrompt &&
+                        !_isRunningSummarization &&
+                        !_isRunningProofreading &&
+                        !_isRunningImageDescription &&
+                        hasValidRewritingInput
+                    ? _runRewriting
+                    : null,
+                icon: _isRunningRewriting
+                    ? const SizedBox.square(
+                        dimension: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.play_arrow),
+                label: Text(
+                  _isRunningRewriting ? 'Rewriting…' : 'Rewrite professionally',
+                ),
+              ),
+              const SizedBox(height: 16),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        'Status: ${_isRunningRewriting
+                            ? 'Rewriting…'
+                            : _rewritingError != null
+                            ? 'Error'
+                            : _rewritingOutput.isNotEmpty
+                            ? 'Completed'
+                            : 'Not run'}',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      if (_rewritingElapsedMilliseconds != null) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          'Processing time: '
+                          '${_formatElapsedTime(_rewritingElapsedMilliseconds!)}',
+                        ),
+                      ],
+                      if (_rewritingSuggestionCount != null) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          'Suggestions returned: $_rewritingSuggestionCount '
+                          '(showing highest confidence)',
+                        ),
+                      ],
+                      if (_submittedRewritingInput != null) ...[
+                        const SizedBox(height: 16),
+                        const Text(
+                          'Exact input sent:',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 8),
+                        SelectableText(_submittedRewritingInput!),
+                      ],
+                      const SizedBox(height: 16),
+                      const Text(
+                        'Output:',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
+                      SelectableText(
+                        _rewritingOutput.isEmpty
+                            ? 'The professional rewrite will appear here.'
+                            : _rewritingOutput,
+                      ),
+                      if (_rewritingError != null) ...[
+                        const SizedBox(height: 16),
+                        SelectableText(
+                          _rewritingError!,
+                          style: TextStyle(color: colors.error),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 40),
+              Text(
+                'Dedicated proofreading test',
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Uses the ML Kit Proofreading API with fixed English keyboard '
+                'input. Official input limit: fewer than 256 tokens.',
+              ),
+              const SizedBox(height: 20),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: proofreadingStatusColor.withValues(
+                            alpha: 0.12,
+                          ),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: proofreadingStatusColor),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                          child: Text(
+                            _proofreadingStatus,
+                            style: TextStyle(
+                              color: proofreadingStatusColor,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      SelectableText(_proofreadingDescription),
+                      if (_proofreadingError != null) ...[
+                        const SizedBox(height: 16),
+                        SelectableText(
+                          _proofreadingError!,
+                          style: TextStyle(color: colors.error),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed:
+                    _isCheckingProofreading ||
+                        _isStartingProofreadingDownload ||
+                        _isRunningProofreading ||
+                        _isRunningPrompt ||
+                        _isRunningSummarization ||
+                        _isRunningRewriting ||
+                        _isStartingDownload ||
+                        _isStartingSummarizationDownload ||
+                        _isStartingRewritingDownload ||
+                        _isRunningImageDescription ||
+                        _isStartingImageDescriptionDownload
+                    ? null
+                    : _checkProofreadingStatus,
+                icon: _isCheckingProofreading
+                    ? const SizedBox.square(
+                        dimension: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.spellcheck),
+                label: Text(
+                  _isCheckingProofreading
+                      ? 'Checking…'
+                      : 'Check proofreading status',
+                ),
+              ),
+              if (_proofreadingStatus == 'DOWNLOADABLE') ...[
+                const SizedBox(height: 12),
+                FilledButton.tonalIcon(
+                  onPressed:
+                      _isStartingProofreadingDownload ||
+                          _isStartingDownload ||
+                          _isStartingSummarizationDownload ||
+                          _isStartingRewritingDownload ||
+                          _isRunningPrompt ||
+                          _isRunningSummarization ||
+                          _isRunningRewriting ||
+                          _isRunningProofreading ||
+                          _isStartingImageDescriptionDownload ||
+                          _isRunningImageDescription
+                      ? null
+                      : _startProofreadingDownload,
+                  icon: _isStartingProofreadingDownload
+                      ? const SizedBox.square(
+                          dimension: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.download),
+                  label: Text(
+                    _isStartingProofreadingDownload
+                        ? 'Starting download…'
+                        : 'Download proofreading assets',
+                  ),
+                ),
+              ],
+              if (_proofreadingDownloadMessage != null) ...[
+                const SizedBox(height: 16),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        LinearProgressIndicator(value: proofreadingProgress),
+                        const SizedBox(height: 12),
+                        Text(_proofreadingDownloadMessage!),
+                        if (_proofreadingDownloadedBytes != null) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            _proofreadingTotalBytes != null &&
+                                    _proofreadingTotalBytes! > 0
+                                ? '${_formatBytes(_proofreadingDownloadedBytes!)} of '
+                                      '${_formatBytes(_proofreadingTotalBytes!)}'
+                                : _formatBytes(_proofreadingDownloadedBytes!),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 24),
+              const Text('Text to proofread:'),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _proofreadingController,
+                enabled: !_isRunningProofreading,
+                minLines: 4,
+                maxLines: 8,
+                onChanged: (_) => setState(() {}),
+                decoration: InputDecoration(
+                  border: const OutlineInputBorder(),
+                  helperText:
+                      '${_proofreadingController.text.length} characters · keep under 256 tokens',
+                ),
+              ),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed:
+                    _proofreadingStatus == 'AVAILABLE' &&
+                        !_isRunningProofreading &&
+                        !_isRunningPrompt &&
+                        !_isRunningSummarization &&
+                        !_isRunningRewriting &&
+                        !_isRunningImageDescription &&
+                        hasValidProofreadingInput
+                    ? _runProofreading
+                    : null,
+                icon: _isRunningProofreading
+                    ? const SizedBox.square(
+                        dimension: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.play_arrow),
+                label: Text(
+                  _isRunningProofreading ? 'Proofreading…' : 'Proofread text',
+                ),
+              ),
+              const SizedBox(height: 16),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        'Status: ${_isRunningProofreading
+                            ? 'Proofreading…'
+                            : _proofreadingError != null
+                            ? 'Error'
+                            : _proofreadingOutput.isNotEmpty
+                            ? 'Completed'
+                            : 'Not run'}',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      if (_proofreadingElapsedMilliseconds != null) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          'Processing time: '
+                          '${_formatElapsedTime(_proofreadingElapsedMilliseconds!)}',
+                        ),
+                      ],
+                      if (_proofreadingSuggestionCount != null) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          'Suggestions returned: $_proofreadingSuggestionCount '
+                          '(showing highest confidence)',
+                        ),
+                      ],
+                      if (_submittedProofreadingInput != null) ...[
+                        const SizedBox(height: 16),
+                        const Text(
+                          'Exact input sent:',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 8),
+                        SelectableText(_submittedProofreadingInput!),
+                      ],
+                      const SizedBox(height: 16),
+                      const Text(
+                        'Output:',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
+                      SelectableText(
+                        _proofreadingOutput.isEmpty
+                            ? 'The proofread text will appear here.'
+                            : _proofreadingOutput,
+                      ),
+                      if (_proofreadingError != null) ...[
+                        const SizedBox(height: 16),
+                        SelectableText(
+                          _proofreadingError!,
+                          style: TextStyle(color: colors.error),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 40),
+              Text(
+                'Dedicated image description test',
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Uses the ML Kit Image Description API with one fixed, locally '
+                'generated 768×512 scene. The API returns one short English '
+                'description.',
+              ),
+              const SizedBox(height: 20),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: imageDescriptionStatusColor.withValues(
+                            alpha: 0.12,
+                          ),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: imageDescriptionStatusColor,
+                          ),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                          child: Text(
+                            _imageDescriptionStatus,
+                            style: TextStyle(
+                              color: imageDescriptionStatusColor,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      SelectableText(_imageDescriptionDescription),
+                      if (_imageDescriptionError != null) ...[
+                        const SizedBox(height: 16),
+                        SelectableText(
+                          _imageDescriptionError!,
+                          style: TextStyle(color: colors.error),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed:
+                    _isCheckingImageDescription ||
+                        _isStartingImageDescriptionDownload ||
+                        _isRunningImageDescription ||
+                        _isRunningPrompt ||
+                        _isRunningSummarization ||
+                        _isRunningRewriting ||
+                        _isRunningProofreading ||
+                        _isStartingDownload ||
+                        _isStartingSummarizationDownload ||
+                        _isStartingRewritingDownload ||
+                        _isStartingProofreadingDownload
+                    ? null
+                    : _checkImageDescriptionStatus,
+                icon: _isCheckingImageDescription
+                    ? const SizedBox.square(
+                        dimension: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.image_search),
+                label: Text(
+                  _isCheckingImageDescription
+                      ? 'Checking…'
+                      : 'Check image description status',
+                ),
+              ),
+              if (_imageDescriptionStatus == 'DOWNLOADABLE') ...[
+                const SizedBox(height: 12),
+                FilledButton.tonalIcon(
+                  onPressed:
+                      _isStartingImageDescriptionDownload ||
+                          _isStartingDownload ||
+                          _isStartingSummarizationDownload ||
+                          _isStartingRewritingDownload ||
+                          _isStartingProofreadingDownload ||
+                          _isRunningPrompt ||
+                          _isRunningSummarization ||
+                          _isRunningRewriting ||
+                          _isRunningProofreading ||
+                          _isRunningImageDescription
+                      ? null
+                      : _startImageDescriptionDownload,
+                  icon: _isStartingImageDescriptionDownload
+                      ? const SizedBox.square(
+                          dimension: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.download),
+                  label: Text(
+                    _isStartingImageDescriptionDownload
+                        ? 'Starting download…'
+                        : 'Download image-description assets',
+                  ),
+                ),
+              ],
+              if (_imageDescriptionDownloadMessage != null) ...[
+                const SizedBox(height: 16),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        LinearProgressIndicator(value: imageDescriptionProgress),
+                        const SizedBox(height: 12),
+                        Text(_imageDescriptionDownloadMessage!),
+                        if (_imageDescriptionDownloadedBytes != null) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            _imageDescriptionTotalBytes != null &&
+                                    _imageDescriptionTotalBytes! > 0
+                                ? '${_formatBytes(_imageDescriptionDownloadedBytes!)} of '
+                                      '${_formatBytes(_imageDescriptionTotalBytes!)}'
+                                : _formatBytes(
+                                    _imageDescriptionDownloadedBytes!,
+                                  ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 24),
+              const Text('Fixed test image:'),
+              const SizedBox(height: 12),
+              Card(
+                clipBehavior: Clip.antiAlias,
+                child: _imageDescriptionTestImageBytes == null
+                    ? const AspectRatio(
+                        aspectRatio: 3 / 2,
+                        child: Center(child: CircularProgressIndicator()),
+                      )
+                    : AspectRatio(
+                        aspectRatio: 3 / 2,
+                        child: Image.memory(
+                          _imageDescriptionTestImageBytes!,
+                          fit: BoxFit.contain,
+                          gaplessPlayback: true,
+                        ),
+                      ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Image ID: ${_imageDescriptionTestImageId ?? 'loading'} · '
+                '${_imageDescriptionTestImageWidth ?? '—'}×'
+                '${_imageDescriptionTestImageHeight ?? '—'}',
+              ),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed:
+                    _imageDescriptionStatus == 'AVAILABLE' &&
+                        _imageDescriptionTestImageBytes != null &&
+                        !_isRunningImageDescription &&
+                        !_isRunningPrompt &&
+                        !_isRunningSummarization &&
+                        !_isRunningRewriting &&
+                        !_isRunningProofreading
+                    ? _runImageDescription
+                    : null,
+                icon: _isRunningImageDescription
+                    ? const SizedBox.square(
+                        dimension: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.play_arrow),
+                label: Text(
+                  _isRunningImageDescription
+                      ? 'Describing image…'
+                      : 'Describe fixed image',
+                ),
+              ),
+              const SizedBox(height: 16),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        'Status: ${_isRunningImageDescription
+                            ? 'Describing…'
+                            : _imageDescriptionError != null
+                            ? 'Error'
+                            : _imageDescriptionOutput.isNotEmpty
+                            ? 'Completed'
+                            : 'Not run'}',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      if (_imageDescriptionElapsedMilliseconds != null) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          'Processing time: '
+                          '${_formatElapsedTime(_imageDescriptionElapsedMilliseconds!)}',
+                        ),
+                      ],
+                      if (_imageDescriptionTestImageId != null) ...[
+                        const SizedBox(height: 16),
+                        const Text(
+                          'Exact image sent:',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '$_imageDescriptionTestImageId · '
+                          '$_imageDescriptionTestImageWidth×'
+                          '$_imageDescriptionTestImageHeight',
+                        ),
+                      ],
+                      const SizedBox(height: 16),
+                      const Text(
+                        'Output:',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
+                      SelectableText(
+                        _imageDescriptionOutput.isEmpty
+                            ? 'The short image description will appear here.'
+                            : _imageDescriptionOutput,
+                      ),
+                      if (_imageDescriptionError != null) ...[
+                        const SizedBox(height: 16),
+                        SelectableText(
+                          _imageDescriptionError!,
                           style: TextStyle(color: colors.error),
                         ),
                       ],

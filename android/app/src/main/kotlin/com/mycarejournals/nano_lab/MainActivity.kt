@@ -1,10 +1,19 @@
 package com.mycarejournals.nano_lab
 
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Path
 import android.os.Build
 import android.os.SystemClock
 import com.google.mlkit.genai.common.DownloadCallback
 import com.google.mlkit.genai.common.FeatureStatus
 import com.google.mlkit.genai.common.GenAiException
+import com.google.mlkit.genai.imagedescription.ImageDescriber
+import com.google.mlkit.genai.imagedescription.ImageDescriberOptions
+import com.google.mlkit.genai.imagedescription.ImageDescription
+import com.google.mlkit.genai.imagedescription.ImageDescriptionRequest
 import com.google.mlkit.genai.prompt.Candidate
 import com.google.mlkit.genai.prompt.GenerateContentRequest
 import com.google.mlkit.genai.prompt.Generation
@@ -15,14 +24,23 @@ import com.google.mlkit.genai.prompt.ModelReleaseStage
 import com.google.mlkit.genai.prompt.SystemInstruction
 import com.google.mlkit.genai.prompt.TextPart
 import com.google.mlkit.genai.prompt.java.GenerativeModelFutures
+import com.google.mlkit.genai.proofreading.Proofreader
+import com.google.mlkit.genai.proofreading.ProofreaderOptions
+import com.google.mlkit.genai.proofreading.Proofreading
+import com.google.mlkit.genai.proofreading.ProofreadingRequest
 import com.google.mlkit.genai.summarization.Summarization
 import com.google.mlkit.genai.summarization.SummarizationRequest
 import com.google.mlkit.genai.summarization.Summarizer
 import com.google.mlkit.genai.summarization.SummarizerOptions
+import com.google.mlkit.genai.rewriting.Rewriter
+import com.google.mlkit.genai.rewriting.RewriterOptions
+import com.google.mlkit.genai.rewriting.Rewriting
+import com.google.mlkit.genai.rewriting.RewritingRequest
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
+import java.io.ByteArrayOutputStream
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executor
 
@@ -35,6 +53,12 @@ class MainActivity : FlutterActivity() {
             "com.mycarejournals.nano_lab/prompt_events"
         const val SUMMARIZATION_DOWNLOAD_EVENT_CHANNEL =
             "com.mycarejournals.nano_lab/summarization_download_events"
+        const val REWRITING_DOWNLOAD_EVENT_CHANNEL =
+            "com.mycarejournals.nano_lab/rewriting_download_events"
+        const val PROOFREADING_DOWNLOAD_EVENT_CHANNEL =
+            "com.mycarejournals.nano_lab/proofreading_download_events"
+        const val IMAGE_DESCRIPTION_DOWNLOAD_EVENT_CHANNEL =
+            "com.mycarejournals.nano_lab/image_description_download_events"
 
         const val METHOD_GET_PROMPT_STATUS = "getPromptStatus"
         const val METHOD_GET_SYSTEM_INSTRUCTION_STATUS =
@@ -47,6 +71,24 @@ class MainActivity : FlutterActivity() {
         const val METHOD_START_SUMMARIZATION_DOWNLOAD =
             "startSummarizationDownload"
         const val METHOD_RUN_SUMMARIZATION = "runSummarization"
+        const val METHOD_GET_REWRITING_STATUS = "getRewritingStatus"
+        const val METHOD_START_REWRITING_DOWNLOAD = "startRewritingDownload"
+        const val METHOD_RUN_REWRITING = "runRewriting"
+        const val METHOD_GET_PROOFREADING_STATUS = "getProofreadingStatus"
+        const val METHOD_START_PROOFREADING_DOWNLOAD =
+            "startProofreadingDownload"
+        const val METHOD_RUN_PROOFREADING = "runProofreading"
+        const val METHOD_GET_IMAGE_DESCRIPTION_STATUS =
+            "getImageDescriptionStatus"
+        const val METHOD_START_IMAGE_DESCRIPTION_DOWNLOAD =
+            "startImageDescriptionDownload"
+        const val METHOD_GET_IMAGE_DESCRIPTION_TEST_IMAGE =
+            "getImageDescriptionTestImage"
+        const val METHOD_RUN_IMAGE_DESCRIPTION = "runImageDescription"
+
+        const val IMAGE_DESCRIPTION_TEST_IMAGE_ID = "synthetic_house_scene_v1"
+        const val IMAGE_DESCRIPTION_TEST_IMAGE_WIDTH = 768
+        const val IMAGE_DESCRIPTION_TEST_IMAGE_HEIGHT = 512
     }
 
     private lateinit var generativeModel: GenerativeModel
@@ -54,10 +96,16 @@ class MainActivity : FlutterActivity() {
     private var modelReleaseStage = ModelReleaseStage.STABLE
     private var modelReleaseStageName = "STABLE"
     private lateinit var summarizer: Summarizer
+    private lateinit var rewriter: Rewriter
+    private lateinit var proofreader: Proofreader
+    private lateinit var imageDescriber: ImageDescriber
 
     private var downloadEventSink: EventChannel.EventSink? = null
     private var promptEventSink: EventChannel.EventSink? = null
     private var summarizationDownloadEventSink: EventChannel.EventSink? = null
+    private var rewritingDownloadEventSink: EventChannel.EventSink? = null
+    private var proofreadingDownloadEventSink: EventChannel.EventSink? = null
+    private var imageDescriptionDownloadEventSink: EventChannel.EventSink? = null
 
     @Volatile
     private var isDownloadInProgress = false
@@ -68,14 +116,29 @@ class MainActivity : FlutterActivity() {
     @Volatile
     private var isSummarizationDownloadInProgress = false
 
+    @Volatile
+    private var isRewritingDownloadInProgress = false
+
+    @Volatile
+    private var isProofreadingDownloadInProgress = false
+
+    @Volatile
+    private var isImageDescriptionDownloadInProgress = false
+
     private var totalDownloadBytes: Long? = null
     private var totalSummarizationDownloadBytes: Long? = null
+    private var totalRewritingDownloadBytes: Long? = null
+    private var totalProofreadingDownloadBytes: Long? = null
+    private var totalImageDescriptionDownloadBytes: Long? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
         configureGenerativeModel(ModelReleaseStage.STABLE, "STABLE")
         configureSummarizer()
+        configureRewriter()
+        configureProofreader()
+        configureImageDescriber()
 
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
@@ -122,6 +185,30 @@ class MainActivity : FlutterActivity() {
                         call.argument<String>("text"),
                         result,
                     )
+                METHOD_GET_REWRITING_STATUS -> checkRewritingStatus(result)
+                METHOD_START_REWRITING_DOWNLOAD ->
+                    startRewritingDownload(result)
+                METHOD_RUN_REWRITING ->
+                    runRewriting(
+                        call.argument<String>("text"),
+                        result,
+                    )
+                METHOD_GET_PROOFREADING_STATUS ->
+                    checkProofreadingStatus(result)
+                METHOD_START_PROOFREADING_DOWNLOAD ->
+                    startProofreadingDownload(result)
+                METHOD_RUN_PROOFREADING ->
+                    runProofreading(
+                        call.argument<String>("text"),
+                        result,
+                    )
+                METHOD_GET_IMAGE_DESCRIPTION_STATUS ->
+                    checkImageDescriptionStatus(result)
+                METHOD_START_IMAGE_DESCRIPTION_DOWNLOAD ->
+                    startImageDescriptionDownload(result)
+                METHOD_GET_IMAGE_DESCRIPTION_TEST_IMAGE ->
+                    getImageDescriptionTestImage(result)
+                METHOD_RUN_IMAGE_DESCRIPTION -> runImageDescription(result)
                 else -> result.notImplemented()
             }
         }
@@ -179,6 +266,60 @@ class MainActivity : FlutterActivity() {
                 }
             },
         )
+
+        EventChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            REWRITING_DOWNLOAD_EVENT_CHANNEL,
+        ).setStreamHandler(
+            object : EventChannel.StreamHandler {
+                override fun onListen(
+                    arguments: Any?,
+                    events: EventChannel.EventSink?,
+                ) {
+                    rewritingDownloadEventSink = events
+                }
+
+                override fun onCancel(arguments: Any?) {
+                    rewritingDownloadEventSink = null
+                }
+            },
+        )
+
+        EventChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            PROOFREADING_DOWNLOAD_EVENT_CHANNEL,
+        ).setStreamHandler(
+            object : EventChannel.StreamHandler {
+                override fun onListen(
+                    arguments: Any?,
+                    events: EventChannel.EventSink?,
+                ) {
+                    proofreadingDownloadEventSink = events
+                }
+
+                override fun onCancel(arguments: Any?) {
+                    proofreadingDownloadEventSink = null
+                }
+            },
+        )
+
+        EventChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            IMAGE_DESCRIPTION_DOWNLOAD_EVENT_CHANNEL,
+        ).setStreamHandler(
+            object : EventChannel.StreamHandler {
+                override fun onListen(
+                    arguments: Any?,
+                    events: EventChannel.EventSink?,
+                ) {
+                    imageDescriptionDownloadEventSink = events
+                }
+
+                override fun onCancel(arguments: Any?) {
+                    imageDescriptionDownloadEventSink = null
+                }
+            },
+        )
     }
 
     private fun configureGenerativeModel(
@@ -211,6 +352,31 @@ class MainActivity : FlutterActivity() {
         summarizer = Summarization.getClient(options)
     }
 
+    private fun configureRewriter() {
+        val options =
+            RewriterOptions.builder(this)
+                .setOutputType(RewriterOptions.OutputType.PROFESSIONAL)
+                .setLanguage(RewriterOptions.Language.ENGLISH)
+                .build()
+
+        rewriter = Rewriting.getClient(options)
+    }
+
+    private fun configureProofreader() {
+        val options =
+            ProofreaderOptions.builder(this)
+                .setInputType(ProofreaderOptions.InputType.KEYBOARD)
+                .setLanguage(ProofreaderOptions.Language.ENGLISH)
+                .build()
+
+        proofreader = Proofreading.getClient(options)
+    }
+
+    private fun configureImageDescriber() {
+        val options = ImageDescriberOptions.builder(this).build()
+        imageDescriber = ImageDescription.getClient(options)
+    }
+
     private fun setModelReleaseStage(
         requestedStage: String?,
         result: MethodChannel.Result,
@@ -218,7 +384,10 @@ class MainActivity : FlutterActivity() {
         if (
             isInferenceInProgress ||
                 isDownloadInProgress ||
-                isSummarizationDownloadInProgress
+                isSummarizationDownloadInProgress ||
+                isRewritingDownloadInProgress ||
+                isProofreadingDownloadInProgress ||
+                isImageDescriptionDownloadInProgress
         ) {
             result.error(
                 "MODEL_CHANGE_BLOCKED",
@@ -295,7 +464,13 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun startPromptDownload(result: MethodChannel.Result) {
-        if (isDownloadInProgress || isSummarizationDownloadInProgress) {
+        if (
+                isDownloadInProgress ||
+                isSummarizationDownloadInProgress ||
+                isRewritingDownloadInProgress ||
+                isProofreadingDownloadInProgress ||
+                isImageDescriptionDownloadInProgress
+        ) {
             result.error(
                 "DOWNLOAD_ALREADY_RUNNING",
                 "A Gemini Nano download is already running.",
@@ -396,7 +571,13 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun startSummarizationDownload(result: MethodChannel.Result) {
-        if (isDownloadInProgress || isSummarizationDownloadInProgress) {
+        if (
+                isDownloadInProgress ||
+                isSummarizationDownloadInProgress ||
+                isRewritingDownloadInProgress ||
+                isProofreadingDownloadInProgress ||
+                isImageDescriptionDownloadInProgress
+        ) {
             result.error(
                 "DOWNLOAD_ALREADY_RUNNING",
                 "A Gemini Nano download is already running.",
@@ -544,6 +725,613 @@ class MainActivity : FlutterActivity() {
             isInferenceInProgress = false
             sendSummarizationInferenceError(result, error, startedAt)
         }
+    }
+
+    private fun checkRewritingStatus(result: MethodChannel.Result) {
+        val statusFuture = rewriter.checkFeatureStatus()
+        val mainExecutor = Executor { command -> runOnUiThread(command) }
+
+        statusFuture.addListener(
+            {
+                try {
+                    result.success(createRewritingStatusResult(statusFuture.get()))
+                } catch (error: Exception) {
+                    sendRewritingStatusError(result, error)
+                }
+            },
+            mainExecutor,
+        )
+    }
+
+    private fun startRewritingDownload(result: MethodChannel.Result) {
+        if (
+                isDownloadInProgress ||
+                isSummarizationDownloadInProgress ||
+                isRewritingDownloadInProgress ||
+                isProofreadingDownloadInProgress ||
+                isImageDescriptionDownloadInProgress
+        ) {
+            result.error(
+                "DOWNLOAD_ALREADY_RUNNING",
+                "A Gemini Nano download is already running.",
+                null,
+            )
+            return
+        }
+
+        if (rewritingDownloadEventSink == null) {
+            result.error(
+                "REWRITING_DOWNLOAD_LISTENER_MISSING",
+                "Flutter is not ready to receive rewriting download progress.",
+                null,
+            )
+            return
+        }
+
+        isRewritingDownloadInProgress = true
+        totalRewritingDownloadBytes = null
+
+        try {
+            rewriter.downloadFeature(
+                object : DownloadCallback {
+                    override fun onDownloadStarted(bytesToDownload: Long) {
+                        totalRewritingDownloadBytes = bytesToDownload
+
+                        sendRewritingDownloadEvent(
+                            mapOf(
+                                "event" to "started",
+                                "totalBytes" to bytesToDownload,
+                            ),
+                        )
+                    }
+
+                    override fun onDownloadProgress(totalBytesDownloaded: Long) {
+                        sendRewritingDownloadEvent(
+                            mapOf(
+                                "event" to "progress",
+                                "downloadedBytes" to totalBytesDownloaded,
+                                "totalBytes" to totalRewritingDownloadBytes,
+                            ),
+                        )
+                    }
+
+                    override fun onDownloadCompleted() {
+                        isRewritingDownloadInProgress = false
+
+                        sendRewritingDownloadEvent(
+                            mapOf(
+                                "event" to "completed",
+                                "downloadedBytes" to totalRewritingDownloadBytes,
+                                "totalBytes" to totalRewritingDownloadBytes,
+                            ),
+                        )
+                    }
+
+                    override fun onDownloadFailed(e: GenAiException) {
+                        isRewritingDownloadInProgress = false
+
+                        sendRewritingDownloadEvent(
+                            mapOf(
+                                "event" to "failed",
+                                "message" to
+                                    (e.message ?: "Rewriting asset download failed."),
+                                "errorCode" to e.errorCode,
+                            ),
+                        )
+                    }
+                },
+            )
+
+            result.success(mapOf("started" to true))
+        } catch (error: Exception) {
+            isRewritingDownloadInProgress = false
+
+            result.error(
+                "REWRITING_DOWNLOAD_START_FAILED",
+                error.message ?: error.toString(),
+                null,
+            )
+        }
+    }
+
+    private fun runRewriting(
+        text: String?,
+        result: MethodChannel.Result,
+    ) {
+        if (text.isNullOrBlank()) {
+            result.error(
+                "INVALID_REWRITING_INPUT",
+                "Enter text before starting rewriting.",
+                null,
+            )
+            return
+        }
+
+        if (isInferenceInProgress) {
+            result.error(
+                "INFERENCE_ALREADY_RUNNING",
+                "A Gemini Nano inference is already running.",
+                null,
+            )
+            return
+        }
+
+        isInferenceInProgress = true
+        val startedAt = SystemClock.elapsedRealtime()
+
+        try {
+            val request = RewritingRequest.builder(text).build()
+            val inferenceFuture = rewriter.runInference(request)
+            val mainExecutor = Executor { command -> runOnUiThread(command) }
+
+            inferenceFuture.addListener(
+                {
+                    try {
+                        val suggestions = inferenceFuture.get().results
+                        val output = suggestions.first().text
+                        isInferenceInProgress = false
+
+                        result.success(
+                            mapOf(
+                                "input" to text,
+                                "output" to output,
+                                "suggestionCount" to suggestions.size,
+                                "elapsedMilliseconds" to
+                                    SystemClock.elapsedRealtime() - startedAt,
+                            ),
+                        )
+                    } catch (error: Exception) {
+                        isInferenceInProgress = false
+                        sendRewritingInferenceError(result, error, startedAt)
+                    }
+                },
+                mainExecutor,
+            )
+        } catch (error: Exception) {
+            isInferenceInProgress = false
+            sendRewritingInferenceError(result, error, startedAt)
+        }
+    }
+
+    private fun checkProofreadingStatus(result: MethodChannel.Result) {
+        val statusFuture = proofreader.checkFeatureStatus()
+        val mainExecutor = Executor { command -> runOnUiThread(command) }
+
+        statusFuture.addListener(
+            {
+                try {
+                    result.success(createProofreadingStatusResult(statusFuture.get()))
+                } catch (error: Exception) {
+                    sendProofreadingStatusError(result, error)
+                }
+            },
+            mainExecutor,
+        )
+    }
+
+    private fun startProofreadingDownload(result: MethodChannel.Result) {
+        if (
+            isDownloadInProgress ||
+                isSummarizationDownloadInProgress ||
+                isRewritingDownloadInProgress ||
+                isProofreadingDownloadInProgress ||
+                isImageDescriptionDownloadInProgress
+        ) {
+            result.error(
+                "DOWNLOAD_ALREADY_RUNNING",
+                "A Gemini Nano download is already running.",
+                null,
+            )
+            return
+        }
+
+        if (proofreadingDownloadEventSink == null) {
+            result.error(
+                "PROOFREADING_DOWNLOAD_LISTENER_MISSING",
+                "Flutter is not ready to receive proofreading download progress.",
+                null,
+            )
+            return
+        }
+
+        isProofreadingDownloadInProgress = true
+        totalProofreadingDownloadBytes = null
+
+        try {
+            proofreader.downloadFeature(
+                object : DownloadCallback {
+                    override fun onDownloadStarted(bytesToDownload: Long) {
+                        totalProofreadingDownloadBytes = bytesToDownload
+
+                        sendProofreadingDownloadEvent(
+                            mapOf(
+                                "event" to "started",
+                                "totalBytes" to bytesToDownload,
+                            ),
+                        )
+                    }
+
+                    override fun onDownloadProgress(totalBytesDownloaded: Long) {
+                        sendProofreadingDownloadEvent(
+                            mapOf(
+                                "event" to "progress",
+                                "downloadedBytes" to totalBytesDownloaded,
+                                "totalBytes" to totalProofreadingDownloadBytes,
+                            ),
+                        )
+                    }
+
+                    override fun onDownloadCompleted() {
+                        isProofreadingDownloadInProgress = false
+
+                        sendProofreadingDownloadEvent(
+                            mapOf(
+                                "event" to "completed",
+                                "downloadedBytes" to totalProofreadingDownloadBytes,
+                                "totalBytes" to totalProofreadingDownloadBytes,
+                            ),
+                        )
+                    }
+
+                    override fun onDownloadFailed(e: GenAiException) {
+                        isProofreadingDownloadInProgress = false
+
+                        sendProofreadingDownloadEvent(
+                            mapOf(
+                                "event" to "failed",
+                                "message" to
+                                    (e.message ?: "Proofreading asset download failed."),
+                                "errorCode" to e.errorCode,
+                            ),
+                        )
+                    }
+                },
+            )
+
+            result.success(mapOf("started" to true))
+        } catch (error: Exception) {
+            isProofreadingDownloadInProgress = false
+
+            result.error(
+                "PROOFREADING_DOWNLOAD_START_FAILED",
+                error.message ?: error.toString(),
+                null,
+            )
+        }
+    }
+
+    private fun runProofreading(
+        text: String?,
+        result: MethodChannel.Result,
+    ) {
+        if (text.isNullOrBlank()) {
+            result.error(
+                "INVALID_PROOFREADING_INPUT",
+                "Enter text before starting proofreading.",
+                null,
+            )
+            return
+        }
+
+        if (isInferenceInProgress) {
+            result.error(
+                "INFERENCE_ALREADY_RUNNING",
+                "A Gemini Nano inference is already running.",
+                null,
+            )
+            return
+        }
+
+        isInferenceInProgress = true
+        val startedAt = SystemClock.elapsedRealtime()
+
+        try {
+            val request = ProofreadingRequest.builder(text).build()
+            val inferenceFuture = proofreader.runInference(request)
+            val mainExecutor = Executor { command -> runOnUiThread(command) }
+
+            inferenceFuture.addListener(
+                {
+                    try {
+                        val suggestions = inferenceFuture.get().results
+                        val output = suggestions.first().text
+                        isInferenceInProgress = false
+
+                        result.success(
+                            mapOf(
+                                "input" to text,
+                                "output" to output,
+                                "suggestionCount" to suggestions.size,
+                                "elapsedMilliseconds" to
+                                    SystemClock.elapsedRealtime() - startedAt,
+                            ),
+                        )
+                    } catch (error: Exception) {
+                        isInferenceInProgress = false
+                        sendProofreadingInferenceError(result, error, startedAt)
+                    }
+                },
+                mainExecutor,
+            )
+        } catch (error: Exception) {
+            isInferenceInProgress = false
+            sendProofreadingInferenceError(result, error, startedAt)
+        }
+    }
+
+    private fun checkImageDescriptionStatus(result: MethodChannel.Result) {
+        val statusFuture = imageDescriber.checkFeatureStatus()
+        val mainExecutor = Executor { command -> runOnUiThread(command) }
+
+        statusFuture.addListener(
+            {
+                try {
+                    result.success(
+                        createImageDescriptionStatusResult(statusFuture.get()),
+                    )
+                } catch (error: Exception) {
+                    sendImageDescriptionStatusError(result, error)
+                }
+            },
+            mainExecutor,
+        )
+    }
+
+    private fun startImageDescriptionDownload(result: MethodChannel.Result) {
+        if (
+            isDownloadInProgress ||
+                isSummarizationDownloadInProgress ||
+                isRewritingDownloadInProgress ||
+                isProofreadingDownloadInProgress ||
+                isImageDescriptionDownloadInProgress
+        ) {
+            result.error(
+                "DOWNLOAD_ALREADY_RUNNING",
+                "A Gemini Nano download is already running.",
+                null,
+            )
+            return
+        }
+
+        if (imageDescriptionDownloadEventSink == null) {
+            result.error(
+                "IMAGE_DESCRIPTION_DOWNLOAD_LISTENER_MISSING",
+                "Flutter is not ready to receive image-description download progress.",
+                null,
+            )
+            return
+        }
+
+        isImageDescriptionDownloadInProgress = true
+        totalImageDescriptionDownloadBytes = null
+
+        try {
+            imageDescriber.downloadFeature(
+                object : DownloadCallback {
+                    override fun onDownloadStarted(bytesToDownload: Long) {
+                        totalImageDescriptionDownloadBytes = bytesToDownload
+
+                        sendImageDescriptionDownloadEvent(
+                            mapOf(
+                                "event" to "started",
+                                "totalBytes" to bytesToDownload,
+                            ),
+                        )
+                    }
+
+                    override fun onDownloadProgress(totalBytesDownloaded: Long) {
+                        sendImageDescriptionDownloadEvent(
+                            mapOf(
+                                "event" to "progress",
+                                "downloadedBytes" to totalBytesDownloaded,
+                                "totalBytes" to totalImageDescriptionDownloadBytes,
+                            ),
+                        )
+                    }
+
+                    override fun onDownloadCompleted() {
+                        isImageDescriptionDownloadInProgress = false
+
+                        sendImageDescriptionDownloadEvent(
+                            mapOf(
+                                "event" to "completed",
+                                "downloadedBytes" to totalImageDescriptionDownloadBytes,
+                                "totalBytes" to totalImageDescriptionDownloadBytes,
+                            ),
+                        )
+                    }
+
+                    override fun onDownloadFailed(e: GenAiException) {
+                        isImageDescriptionDownloadInProgress = false
+
+                        sendImageDescriptionDownloadEvent(
+                            mapOf(
+                                "event" to "failed",
+                                "message" to
+                                    (e.message ?: "Image-description asset download failed."),
+                                "errorCode" to e.errorCode,
+                            ),
+                        )
+                    }
+                },
+            )
+
+            result.success(mapOf("started" to true))
+        } catch (error: Exception) {
+            isImageDescriptionDownloadInProgress = false
+
+            result.error(
+                "IMAGE_DESCRIPTION_DOWNLOAD_START_FAILED",
+                error.message ?: error.toString(),
+                null,
+            )
+        }
+    }
+
+    private fun getImageDescriptionTestImage(result: MethodChannel.Result) {
+        val bitmap =
+            try {
+                createImageDescriptionTestBitmap()
+            } catch (error: Exception) {
+                result.error(
+                    "TEST_IMAGE_CREATION_FAILED",
+                    error.message ?: error.toString(),
+                    null,
+                )
+                return
+            }
+
+        try {
+            val outputStream = ByteArrayOutputStream()
+            val compressed =
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream)
+
+            if (!compressed) {
+                result.error(
+                    "TEST_IMAGE_ENCODING_FAILED",
+                    "The fixed image-description test scene could not be encoded.",
+                    null,
+                )
+                return
+            }
+
+            result.success(
+                mapOf(
+                    "imageBytes" to outputStream.toByteArray(),
+                    "imageId" to IMAGE_DESCRIPTION_TEST_IMAGE_ID,
+                    "width" to IMAGE_DESCRIPTION_TEST_IMAGE_WIDTH,
+                    "height" to IMAGE_DESCRIPTION_TEST_IMAGE_HEIGHT,
+                ),
+            )
+        } catch (error: Exception) {
+            result.error(
+                "TEST_IMAGE_CREATION_FAILED",
+                error.message ?: error.toString(),
+                null,
+            )
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
+    private fun runImageDescription(result: MethodChannel.Result) {
+        if (isInferenceInProgress) {
+            result.error(
+                "INFERENCE_ALREADY_RUNNING",
+                "A Gemini Nano inference is already running.",
+                null,
+            )
+            return
+        }
+
+        isInferenceInProgress = true
+        val startedAt = SystemClock.elapsedRealtime()
+        val bitmap =
+            try {
+                createImageDescriptionTestBitmap()
+            } catch (error: Exception) {
+                isInferenceInProgress = false
+                sendImageDescriptionInferenceError(result, error, startedAt)
+                return
+            }
+
+        try {
+            val request = ImageDescriptionRequest.builder(bitmap).build()
+            val inferenceFuture = imageDescriber.runInference(request)
+            val mainExecutor = Executor { command -> runOnUiThread(command) }
+
+            inferenceFuture.addListener(
+                {
+                    try {
+                        val output = inferenceFuture.get().description
+                        isInferenceInProgress = false
+
+                        result.success(
+                            mapOf(
+                                "imageId" to IMAGE_DESCRIPTION_TEST_IMAGE_ID,
+                                "width" to IMAGE_DESCRIPTION_TEST_IMAGE_WIDTH,
+                                "height" to IMAGE_DESCRIPTION_TEST_IMAGE_HEIGHT,
+                                "output" to output,
+                                "elapsedMilliseconds" to
+                                    SystemClock.elapsedRealtime() - startedAt,
+                            ),
+                        )
+                    } catch (error: Exception) {
+                        isInferenceInProgress = false
+                        sendImageDescriptionInferenceError(result, error, startedAt)
+                    } finally {
+                        bitmap.recycle()
+                    }
+                },
+                mainExecutor,
+            )
+        } catch (error: Exception) {
+            isInferenceInProgress = false
+            bitmap.recycle()
+            sendImageDescriptionInferenceError(result, error, startedAt)
+        }
+    }
+
+    private fun createImageDescriptionTestBitmap(): Bitmap {
+        val bitmap =
+            Bitmap.createBitmap(
+                IMAGE_DESCRIPTION_TEST_IMAGE_WIDTH,
+                IMAGE_DESCRIPTION_TEST_IMAGE_HEIGHT,
+                Bitmap.Config.ARGB_8888,
+            )
+        val canvas = Canvas(bitmap)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+        canvas.drawColor(Color.rgb(135, 206, 235))
+
+        paint.color = Color.rgb(76, 175, 80)
+        canvas.drawRect(0f, 350f, 768f, 512f, paint)
+
+        paint.color = Color.rgb(255, 214, 0)
+        canvas.drawCircle(650f, 85f, 50f, paint)
+
+        paint.color = Color.WHITE
+        canvas.drawCircle(100f, 90f, 28f, paint)
+        canvas.drawCircle(135f, 75f, 38f, paint)
+        canvas.drawCircle(175f, 92f, 30f, paint)
+        canvas.drawCircle(500f, 120f, 24f, paint)
+        canvas.drawCircle(532f, 105f, 34f, paint)
+        canvas.drawCircle(568f, 122f, 26f, paint)
+
+        paint.color = Color.rgb(198, 40, 40)
+        canvas.drawRect(140f, 220f, 430f, 420f, paint)
+
+        paint.color = Color.rgb(93, 64, 55)
+        val roof = Path()
+        roof.moveTo(110f, 230f)
+        roof.lineTo(285f, 95f)
+        roof.lineTo(460f, 230f)
+        roof.close()
+        canvas.drawPath(roof, paint)
+
+        paint.color = Color.rgb(30, 136, 229)
+        canvas.drawRect(255f, 315f, 325f, 420f, paint)
+
+        paint.color = Color.rgb(255, 235, 59)
+        canvas.drawRect(175f, 265f, 230f, 320f, paint)
+        canvas.drawRect(345f, 265f, 400f, 320f, paint)
+
+        paint.color = Color.rgb(62, 39, 35)
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 7f
+        canvas.drawRect(175f, 265f, 230f, 320f, paint)
+        canvas.drawRect(345f, 265f, 400f, 320f, paint)
+        paint.style = Paint.Style.FILL
+
+        paint.color = Color.rgb(121, 85, 72)
+        canvas.drawRect(530f, 285f, 565f, 420f, paint)
+
+        paint.color = Color.rgb(27, 121, 55)
+        canvas.drawCircle(548f, 250f, 72f, paint)
+        canvas.drawCircle(505f, 275f, 52f, paint)
+        canvas.drawCircle(592f, 275f, 52f, paint)
+
+        return bitmap
     }
 
     private fun getTokenInfo(
@@ -805,6 +1593,24 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun sendRewritingDownloadEvent(event: Map<String, Any?>) {
+        runOnUiThread {
+            rewritingDownloadEventSink?.success(event)
+        }
+    }
+
+    private fun sendProofreadingDownloadEvent(event: Map<String, Any?>) {
+        runOnUiThread {
+            proofreadingDownloadEventSink?.success(event)
+        }
+    }
+
+    private fun sendImageDescriptionDownloadEvent(event: Map<String, Any?>) {
+        runOnUiThread {
+            imageDescriptionDownloadEventSink?.success(event)
+        }
+    }
+
     private fun sendPromptFailure(
         error: Exception,
         startedAt: Long,
@@ -853,6 +1659,84 @@ class MainActivity : FlutterActivity() {
         } else {
             result.error(
                 "SUMMARIZATION_FAILED",
+                cause.message ?: cause.toString(),
+                mapOf("elapsedMilliseconds" to elapsedMilliseconds),
+            )
+        }
+    }
+
+    private fun sendRewritingInferenceError(
+        result: MethodChannel.Result,
+        error: Exception,
+        startedAt: Long,
+    ) {
+        val cause = unwrapExecutionError(error)
+        val elapsedMilliseconds = SystemClock.elapsedRealtime() - startedAt
+
+        if (cause is GenAiException) {
+            result.error(
+                "GENAI_REWRITING_${cause.errorCode}",
+                cause.message ?: "Gemini Nano rewriting failed.",
+                mapOf(
+                    "errorCode" to cause.errorCode,
+                    "elapsedMilliseconds" to elapsedMilliseconds,
+                ),
+            )
+        } else {
+            result.error(
+                "REWRITING_FAILED",
+                cause.message ?: cause.toString(),
+                mapOf("elapsedMilliseconds" to elapsedMilliseconds),
+            )
+        }
+    }
+
+    private fun sendProofreadingInferenceError(
+        result: MethodChannel.Result,
+        error: Exception,
+        startedAt: Long,
+    ) {
+        val cause = unwrapExecutionError(error)
+        val elapsedMilliseconds = SystemClock.elapsedRealtime() - startedAt
+
+        if (cause is GenAiException) {
+            result.error(
+                "GENAI_PROOFREADING_${cause.errorCode}",
+                cause.message ?: "Gemini Nano proofreading failed.",
+                mapOf(
+                    "errorCode" to cause.errorCode,
+                    "elapsedMilliseconds" to elapsedMilliseconds,
+                ),
+            )
+        } else {
+            result.error(
+                "PROOFREADING_FAILED",
+                cause.message ?: cause.toString(),
+                mapOf("elapsedMilliseconds" to elapsedMilliseconds),
+            )
+        }
+    }
+
+    private fun sendImageDescriptionInferenceError(
+        result: MethodChannel.Result,
+        error: Exception,
+        startedAt: Long,
+    ) {
+        val cause = unwrapExecutionError(error)
+        val elapsedMilliseconds = SystemClock.elapsedRealtime() - startedAt
+
+        if (cause is GenAiException) {
+            result.error(
+                "GENAI_IMAGE_DESCRIPTION_${cause.errorCode}",
+                cause.message ?: "Gemini Nano image description failed.",
+                mapOf(
+                    "errorCode" to cause.errorCode,
+                    "elapsedMilliseconds" to elapsedMilliseconds,
+                ),
+            )
+        } else {
+            result.error(
+                "IMAGE_DESCRIPTION_FAILED",
                 cause.message ?: cause.toString(),
                 mapOf("elapsedMilliseconds" to elapsedMilliseconds),
             )
@@ -1041,6 +1925,132 @@ class MainActivity : FlutterActivity() {
         )
     }
 
+    private fun createRewritingStatusResult(status: Int): Map<String, Any> {
+        val statusName: String
+        val description: String
+
+        when (status) {
+            FeatureStatus.AVAILABLE -> {
+                statusName = "AVAILABLE"
+                description = "The dedicated Rewriting API is ready to use."
+            }
+
+            FeatureStatus.DOWNLOADABLE -> {
+                statusName = "DOWNLOADABLE"
+                description =
+                    "This device supports rewriting, but its required assets need to be downloaded."
+            }
+
+            FeatureStatus.DOWNLOADING -> {
+                statusName = "DOWNLOADING"
+                description = "The required rewriting assets are currently downloading."
+            }
+
+            FeatureStatus.UNAVAILABLE -> {
+                statusName = "UNAVAILABLE"
+                description =
+                    "The selected English professional rewriting configuration is unavailable."
+            }
+
+            else -> {
+                statusName = "UNKNOWN"
+                description =
+                    "The Rewriting API returned an unrecognized status value: $status."
+            }
+        }
+
+        return mapOf(
+            "status" to statusName,
+            "description" to description,
+            "statusCode" to status,
+        )
+    }
+
+    private fun createProofreadingStatusResult(status: Int): Map<String, Any> {
+        val statusName: String
+        val description: String
+
+        when (status) {
+            FeatureStatus.AVAILABLE -> {
+                statusName = "AVAILABLE"
+                description = "The dedicated Proofreading API is ready to use."
+            }
+
+            FeatureStatus.DOWNLOADABLE -> {
+                statusName = "DOWNLOADABLE"
+                description =
+                    "This device supports proofreading, but its required assets need to be downloaded."
+            }
+
+            FeatureStatus.DOWNLOADING -> {
+                statusName = "DOWNLOADING"
+                description = "The required proofreading assets are currently downloading."
+            }
+
+            FeatureStatus.UNAVAILABLE -> {
+                statusName = "UNAVAILABLE"
+                description =
+                    "The selected English keyboard proofreading configuration is unavailable."
+            }
+
+            else -> {
+                statusName = "UNKNOWN"
+                description =
+                    "The Proofreading API returned an unrecognized status value: $status."
+            }
+        }
+
+        return mapOf(
+            "status" to statusName,
+            "description" to description,
+            "statusCode" to status,
+        )
+    }
+
+    private fun createImageDescriptionStatusResult(
+        status: Int,
+    ): Map<String, Any> {
+        val statusName: String
+        val description: String
+
+        when (status) {
+            FeatureStatus.AVAILABLE -> {
+                statusName = "AVAILABLE"
+                description = "The dedicated Image Description API is ready to use."
+            }
+
+            FeatureStatus.DOWNLOADABLE -> {
+                statusName = "DOWNLOADABLE"
+                description =
+                    "This device supports image description, but its required assets need to be downloaded."
+            }
+
+            FeatureStatus.DOWNLOADING -> {
+                statusName = "DOWNLOADING"
+                description =
+                    "The required image-description assets are currently downloading."
+            }
+
+            FeatureStatus.UNAVAILABLE -> {
+                statusName = "UNAVAILABLE"
+                description =
+                    "The selected Image Description API configuration is unavailable."
+            }
+
+            else -> {
+                statusName = "UNKNOWN"
+                description =
+                    "The Image Description API returned an unrecognized status value: $status."
+            }
+        }
+
+        return mapOf(
+            "status" to statusName,
+            "description" to description,
+            "statusCode" to status,
+        )
+    }
+
     private fun sendStatusError(
         result: MethodChannel.Result,
         error: Exception,
@@ -1104,6 +2114,69 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun sendRewritingStatusError(
+        result: MethodChannel.Result,
+        error: Exception,
+    ) {
+        val cause = unwrapExecutionError(error)
+
+        if (cause is GenAiException) {
+            result.error(
+                "GENAI_REWRITING_STATUS_${cause.errorCode}",
+                cause.message ?: "Rewriting status detection failed.",
+                mapOf("errorCode" to cause.errorCode),
+            )
+        } else {
+            result.error(
+                "REWRITING_STATUS_FAILED",
+                cause.message ?: cause.toString(),
+                null,
+            )
+        }
+    }
+
+    private fun sendProofreadingStatusError(
+        result: MethodChannel.Result,
+        error: Exception,
+    ) {
+        val cause = unwrapExecutionError(error)
+
+        if (cause is GenAiException) {
+            result.error(
+                "GENAI_PROOFREADING_STATUS_${cause.errorCode}",
+                cause.message ?: "Proofreading status detection failed.",
+                mapOf("errorCode" to cause.errorCode),
+            )
+        } else {
+            result.error(
+                "PROOFREADING_STATUS_FAILED",
+                cause.message ?: cause.toString(),
+                null,
+            )
+        }
+    }
+
+    private fun sendImageDescriptionStatusError(
+        result: MethodChannel.Result,
+        error: Exception,
+    ) {
+        val cause = unwrapExecutionError(error)
+
+        if (cause is GenAiException) {
+            result.error(
+                "GENAI_IMAGE_DESCRIPTION_STATUS_${cause.errorCode}",
+                cause.message ?: "Image-description status detection failed.",
+                mapOf("errorCode" to cause.errorCode),
+            )
+        } else {
+            result.error(
+                "IMAGE_DESCRIPTION_STATUS_FAILED",
+                cause.message ?: cause.toString(),
+                null,
+            )
+        }
+    }
+
     private fun sendTokenInfoError(
         result: MethodChannel.Result,
         error: Exception,
@@ -1137,6 +2210,9 @@ class MainActivity : FlutterActivity() {
         downloadEventSink = null
         promptEventSink = null
         summarizationDownloadEventSink = null
+        rewritingDownloadEventSink = null
+        proofreadingDownloadEventSink = null
+        imageDescriptionDownloadEventSink = null
 
         if (::generativeModel.isInitialized) {
             generativeModel.close()
@@ -1144,6 +2220,18 @@ class MainActivity : FlutterActivity() {
 
         if (::summarizer.isInitialized) {
             summarizer.close()
+        }
+
+        if (::rewriter.isInitialized) {
+            rewriter.close()
+        }
+
+        if (::proofreader.isInitialized) {
+            proofreader.close()
+        }
+
+        if (::imageDescriber.isInitialized) {
+            imageDescriber.close()
         }
 
         super.onDestroy()

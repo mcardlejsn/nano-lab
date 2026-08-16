@@ -47,4 +47,7 @@ flutter {
 dependencies {
     implementation("com.google.mlkit:genai-prompt:1.0.0-beta4")
     implementation("com.google.mlkit:genai-summarization:1.0.0-beta1")
+    implementation("com.google.mlkit:genai-rewriting:1.0.0-beta1")
+    implementation("com.google.mlkit:genai-proofreading:1.0.0-beta1")
+    implementation("com.google.mlkit:genai-image-description:1.0.0-beta1")
 }

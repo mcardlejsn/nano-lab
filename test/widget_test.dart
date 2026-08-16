@@ -13,5 +13,11 @@ void main() {
     expect(find.text('Check Gemini Nano status'), findsOneWidget);
     expect(find.text('Dedicated summarization test'), findsOneWidget);
     expect(find.text('Check summarization status'), findsOneWidget);
+    expect(find.text('Dedicated rewriting test'), findsOneWidget);
+    expect(find.text('Check rewriting status'), findsOneWidget);
+    expect(find.text('Dedicated proofreading test'), findsOneWidget);
+    expect(find.text('Check proofreading status'), findsOneWidget);
+    expect(find.text('Dedicated image description test'), findsOneWidget);
+    expect(find.text('Check image description status'), findsOneWidget);
   });
 }
