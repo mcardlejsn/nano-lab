@@ -9,7 +9,9 @@ void main() {
 
     expect(find.text('Nano Lab'), findsOneWidget);
     expect(find.text('Gemini Nano status'), findsOneWidget);
-    expect(find.text('NOT CHECKED'), findsOneWidget);
+    expect(find.text('NOT CHECKED'), findsWidgets);
     expect(find.text('Check Gemini Nano status'), findsOneWidget);
+    expect(find.text('Dedicated summarization test'), findsOneWidget);
+    expect(find.text('Check summarization status'), findsOneWidget);
   });
 }
