@@ -144,7 +144,7 @@ It should not be the sole authority for safety-critical decisions, exact transcr
 
 This project was designed, run, and evaluated by Jason McArdle on physical Android hardware.
 
-AI assistance was used for implementation support, API research, troubleshooting, interpretation of technical concepts, and documentation drafting. The reported measurements and device behavior came from Nano Lab running on the physical test device, not from simulated or AI-generated test results.
+AI tools were used as development aids for coding, technical research, troubleshooting, and documentation. The reported measurements and device behavior came from Nano Lab running on the physical test device, not from simulated or AI-generated test results.
 
 ## Official documentation
 
