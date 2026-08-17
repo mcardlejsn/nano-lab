@@ -21,5 +21,8 @@ void main() {
     expect(find.text('Check image description status'), findsOneWidget);
     expect(find.text('Test image'), findsOneWidget);
     expect(find.text('Synthetic house scene'), findsWidgets);
+    expect(find.text('Dedicated speech recognition test'), findsOneWidget);
+    expect(find.text('Check speech recognition status'), findsOneWidget);
+    expect(find.text('Fixed phrase to speak:'), findsOneWidget);
   });
 }

@@ -99,6 +99,14 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
     'com.mycarejournals.nano_lab/image_description_download_events',
   );
 
+  static const _speechRecognitionDownloadChannel = EventChannel(
+    'com.mycarejournals.nano_lab/speech_recognition_download_events',
+  );
+
+  static const _speechRecognitionChannel = EventChannel(
+    'com.mycarejournals.nano_lab/speech_recognition_events',
+  );
+
   static const _syntheticImageDescriptionTestImageId =
       'synthetic_house_scene_v1';
   static const _realPhotoImageDescriptionTestImageId = 'real_tabletop_photo_v1';
@@ -152,6 +160,11 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
       'the fictional Northbridge office recieve 17 packages on Monday, but '
       'three was labeld incorrect and needs to be checked by Friday.';
 
+  static const _speechRecognitionTestPhrase =
+      'On Monday, August seventeenth, twenty twenty-six, the fictional '
+      'Northbridge office received seventeen packages. Three were labeled '
+      'incorrectly and must be checked by Friday at four fifteen P.M.';
+
   late final TextEditingController _promptController;
   late final TextEditingController _systemInstructionController;
   late final TextEditingController _maxOutputTokensController;
@@ -168,6 +181,8 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
   late final StreamSubscription<dynamic> _rewritingDownloadSubscription;
   late final StreamSubscription<dynamic> _proofreadingDownloadSubscription;
   late final StreamSubscription<dynamic> _imageDescriptionDownloadSubscription;
+  late final StreamSubscription<dynamic> _speechRecognitionDownloadSubscription;
+  late final StreamSubscription<dynamic> _speechRecognitionSubscription;
 
   bool _isChecking = false;
   bool _isStartingDownload = false;
@@ -185,6 +200,11 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
   bool _isStartingImageDescriptionDownload = false;
   bool _isRunningImageDescription = false;
   bool _isLoadingImageDescriptionTestImage = false;
+  bool _isCheckingSpeechRecognition = false;
+  bool _isStartingSpeechRecognitionDownload = false;
+  bool _isStartingSpeechRecognition = false;
+  bool _isStoppingSpeechRecognition = false;
+  bool _isRunningSpeechRecognition = false;
   bool _systemInstructionAvailable = false;
   double _temperature = 0.0;
   String _modelReleaseStage = 'STABLE';
@@ -273,6 +293,18 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
   int? _imageDescriptionTotalBytes;
   int? _imageDescriptionElapsedMilliseconds;
 
+  String _speechRecognitionStatus = 'NOT CHECKED';
+  String _speechRecognitionDescription =
+      'Check whether Advanced en-US speech recognition is available.';
+  String _speechRecognitionSessionStatus = 'Not run';
+  String? _speechRecognitionError;
+  String? _speechRecognitionDownloadMessage;
+  String _speechRecognitionPartialText = '';
+  String _speechRecognitionFinalText = '';
+  int? _speechRecognitionDownloadedBytes;
+  int? _speechRecognitionTotalBytes;
+  int? _speechRecognitionElapsedMilliseconds;
+
   @override
   void initState() {
     super.initState();
@@ -331,6 +363,20 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
           onError: _handleImageDescriptionDownloadStreamError,
         );
 
+    _speechRecognitionDownloadSubscription = _speechRecognitionDownloadChannel
+        .receiveBroadcastStream()
+        .listen(
+          _handleSpeechRecognitionDownloadEvent,
+          onError: _handleSpeechRecognitionDownloadStreamError,
+        );
+
+    _speechRecognitionSubscription = _speechRecognitionChannel
+        .receiveBroadcastStream()
+        .listen(
+          _handleSpeechRecognitionEvent,
+          onError: _handleSpeechRecognitionStreamError,
+        );
+
     _loadImageDescriptionTestImage();
   }
 
@@ -342,6 +388,8 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
     _rewritingDownloadSubscription.cancel();
     _proofreadingDownloadSubscription.cancel();
     _imageDescriptionDownloadSubscription.cancel();
+    _speechRecognitionDownloadSubscription.cancel();
+    _speechRecognitionSubscription.cancel();
     _promptController.dispose();
     _systemInstructionController.dispose();
     _maxOutputTokensController.dispose();
@@ -1460,6 +1508,230 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
     }
   }
 
+  Future<void> _checkSpeechRecognitionStatus() async {
+    setState(() {
+      _isCheckingSpeechRecognition = true;
+      _speechRecognitionStatus = 'CHECKING';
+      _speechRecognitionDescription =
+          'Checking the Advanced en-US speech-recognition configuration…';
+      _speechRecognitionError = null;
+    });
+
+    try {
+      final result = await _nativeChannel.invokeMapMethod<String, dynamic>(
+        'getSpeechRecognitionStatus',
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      if (result == null) {
+        setState(() {
+          _speechRecognitionStatus = 'ERROR';
+          _speechRecognitionDescription =
+              'Kotlin returned no speech-recognition status information.';
+        });
+        return;
+      }
+
+      setState(() {
+        _speechRecognitionStatus = result['status']?.toString() ?? 'UNKNOWN';
+        _speechRecognitionDescription =
+            result['description']?.toString() ??
+            'No speech-recognition status description was returned.';
+      });
+    } on PlatformException catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _speechRecognitionStatus = 'ERROR';
+        _speechRecognitionDescription =
+            error.message ?? 'Speech-recognition status detection failed.';
+        _speechRecognitionError = 'Platform error: ${error.code}';
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _speechRecognitionStatus = 'ERROR';
+        _speechRecognitionDescription =
+            'Unexpected speech-recognition status-check failure.';
+        _speechRecognitionError = error.toString();
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isCheckingSpeechRecognition = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _startSpeechRecognitionDownload() async {
+    setState(() {
+      _isStartingSpeechRecognitionDownload = true;
+      _speechRecognitionDownloadMessage =
+          'Requesting the speech-recognition asset download…';
+      _speechRecognitionDownloadedBytes = null;
+      _speechRecognitionTotalBytes = null;
+      _speechRecognitionError = null;
+    });
+
+    try {
+      await _nativeChannel.invokeMethod<dynamic>(
+        'startSpeechRecognitionDownload',
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _speechRecognitionStatus = 'DOWNLOADING';
+        _speechRecognitionDescription =
+            'The required speech-recognition assets are downloading.';
+      });
+    } on PlatformException catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _speechRecognitionDownloadMessage = null;
+        _speechRecognitionError =
+            '${error.message ?? 'The speech-recognition download could not be started.'}\n'
+            'Platform error: ${error.code}';
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _speechRecognitionDownloadMessage = null;
+        _speechRecognitionError =
+            'Unexpected speech-recognition download error: $error';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isStartingSpeechRecognitionDownload = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _startSpeechRecognition() async {
+    setState(() {
+      _isStartingSpeechRecognition = true;
+      _speechRecognitionSessionStatus = 'Requesting microphone permission…';
+      _speechRecognitionPartialText = '';
+      _speechRecognitionFinalText = '';
+      _speechRecognitionElapsedMilliseconds = null;
+      _speechRecognitionError = null;
+    });
+
+    try {
+      final permissionResult = await _nativeChannel
+          .invokeMapMethod<String, dynamic>(
+            'requestSpeechRecognitionPermission',
+          );
+
+      if (!mounted) {
+        return;
+      }
+
+      if (permissionResult?['granted'] != true) {
+        setState(() {
+          _speechRecognitionSessionStatus = 'Permission denied';
+          _speechRecognitionError =
+              'Microphone permission is required for the live speech test. '
+              'You can allow it in Android app settings and try again.';
+        });
+        return;
+      }
+
+      setState(() {
+        _speechRecognitionSessionStatus = 'Starting microphone…';
+      });
+
+      await _nativeChannel.invokeMethod<dynamic>('startSpeechRecognition');
+    } on PlatformException catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _speechRecognitionSessionStatus = 'Error';
+        _isRunningSpeechRecognition = false;
+        _speechRecognitionError =
+            '${error.message ?? 'Speech recognition could not be started.'}\n'
+            'Platform error: ${error.code}';
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _speechRecognitionSessionStatus = 'Error';
+        _isRunningSpeechRecognition = false;
+        _speechRecognitionError =
+            'Unexpected speech-recognition start error: $error';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isStartingSpeechRecognition = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _stopSpeechRecognition() async {
+    setState(() {
+      _isStoppingSpeechRecognition = true;
+      _speechRecognitionSessionStatus = 'Stopping…';
+      _speechRecognitionError = null;
+    });
+
+    try {
+      await _nativeChannel.invokeMethod<dynamic>('stopSpeechRecognition');
+    } on PlatformException catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _speechRecognitionSessionStatus = 'Stop failed';
+        _speechRecognitionError =
+            '${error.message ?? 'Speech recognition could not be stopped.'}\n'
+            'Platform error: ${error.code}';
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _speechRecognitionSessionStatus = 'Stop failed';
+        _speechRecognitionError =
+            'Unexpected speech-recognition stop error: $error';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isStoppingSpeechRecognition = false;
+        });
+      }
+    }
+  }
+
   Future<void> _runPrompt({_PromptRun? repeatRun}) async {
     final prompt = repeatRun?.prompt ?? _promptController.text;
     final systemInstruction = repeatRun == null
@@ -1976,6 +2248,139 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
     });
   }
 
+  void _handleSpeechRecognitionDownloadEvent(dynamic event) {
+    if (!mounted || event is! Map) {
+      return;
+    }
+
+    final eventName = event['event']?.toString();
+
+    setState(() {
+      switch (eventName) {
+        case 'started':
+          _speechRecognitionStatus = 'DOWNLOADING';
+          _speechRecognitionDescription =
+              'The required speech-recognition assets are downloading.';
+          _speechRecognitionTotalBytes = _readInteger(event['totalBytes']);
+          _speechRecognitionDownloadedBytes = 0;
+          _speechRecognitionDownloadMessage =
+              'Speech-recognition download started.';
+          break;
+
+        case 'progress':
+          _speechRecognitionStatus = 'DOWNLOADING';
+          _speechRecognitionDownloadedBytes = _readInteger(
+            event['downloadedBytes'],
+          );
+          _speechRecognitionTotalBytes =
+              _readInteger(event['totalBytes']) ?? _speechRecognitionTotalBytes;
+          _speechRecognitionDownloadMessage =
+              'Downloading speech-recognition assets…';
+          break;
+
+        case 'completed':
+          _speechRecognitionStatus = 'AVAILABLE';
+          _speechRecognitionDescription =
+              'Advanced en-US speech recognition is ready to use.';
+          _speechRecognitionDownloadedBytes =
+              _readInteger(event['downloadedBytes']) ??
+              _speechRecognitionTotalBytes;
+          _speechRecognitionTotalBytes =
+              _readInteger(event['totalBytes']) ?? _speechRecognitionTotalBytes;
+          _speechRecognitionDownloadMessage =
+              'Speech-recognition download completed successfully.';
+          _speechRecognitionError = null;
+          break;
+
+        case 'failed':
+          _speechRecognitionStatus = 'DOWNLOADABLE';
+          _speechRecognitionDescription =
+              'This device supports Advanced en-US speech recognition, but its assets are not ready.';
+          _speechRecognitionDownloadMessage = null;
+          _speechRecognitionError =
+              '${event['message'] ?? 'Speech-recognition asset download failed.'}'
+              '${event['errorCode'] == null ? '' : '\nGenAI error code: ${event['errorCode']}'}';
+          break;
+      }
+    });
+  }
+
+  void _handleSpeechRecognitionEvent(dynamic event) {
+    if (!mounted || event is! Map) {
+      return;
+    }
+
+    final eventName = event['event']?.toString();
+
+    setState(() {
+      switch (eventName) {
+        case 'started':
+          _isRunningSpeechRecognition = true;
+          _speechRecognitionSessionStatus = 'Listening';
+          _speechRecognitionPartialText = '';
+          _speechRecognitionFinalText = '';
+          _speechRecognitionElapsedMilliseconds = 0;
+          _speechRecognitionError = null;
+          break;
+
+        case 'partial':
+          _isRunningSpeechRecognition = true;
+          _speechRecognitionSessionStatus = 'Listening';
+          _speechRecognitionPartialText = event['text']?.toString() ?? '';
+          _speechRecognitionFinalText =
+              event['finalText']?.toString() ?? _speechRecognitionFinalText;
+          _speechRecognitionElapsedMilliseconds =
+              _readInteger(event['elapsedMilliseconds']) ??
+              _speechRecognitionElapsedMilliseconds;
+          break;
+
+        case 'final':
+          _isRunningSpeechRecognition = true;
+          _speechRecognitionSessionStatus = 'Listening';
+          _speechRecognitionFinalText =
+              event['finalText']?.toString() ??
+              event['text']?.toString() ??
+              _speechRecognitionFinalText;
+          _speechRecognitionPartialText = '';
+          _speechRecognitionElapsedMilliseconds =
+              _readInteger(event['elapsedMilliseconds']) ??
+              _speechRecognitionElapsedMilliseconds;
+          break;
+
+        case 'stopping':
+          _speechRecognitionSessionStatus = 'Stopping…';
+          break;
+
+        case 'completed':
+          _isRunningSpeechRecognition = false;
+          _isStoppingSpeechRecognition = false;
+          _speechRecognitionSessionStatus = 'Completed';
+          _speechRecognitionFinalText =
+              event['finalText']?.toString() ?? _speechRecognitionFinalText;
+          _speechRecognitionPartialText = '';
+          _speechRecognitionElapsedMilliseconds =
+              _readInteger(event['elapsedMilliseconds']) ??
+              _speechRecognitionElapsedMilliseconds;
+          break;
+
+        case 'failed':
+          _isRunningSpeechRecognition = false;
+          _isStoppingSpeechRecognition = false;
+          _speechRecognitionSessionStatus = 'Error';
+          _speechRecognitionFinalText =
+              event['finalText']?.toString() ?? _speechRecognitionFinalText;
+          _speechRecognitionPartialText = '';
+          _speechRecognitionElapsedMilliseconds =
+              _readInteger(event['elapsedMilliseconds']) ??
+              _speechRecognitionElapsedMilliseconds;
+          _speechRecognitionError =
+              '${event['message'] ?? 'Speech recognition failed.'}'
+              '${event['errorCode'] == null ? '' : '\nGenAI error code: ${event['errorCode']}'}';
+          break;
+      }
+    });
+  }
+
   void _handlePromptEvent(dynamic event) {
     if (!mounted || event is! Map) {
       return;
@@ -2169,6 +2574,32 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
     });
   }
 
+  void _handleSpeechRecognitionDownloadStreamError(Object error) {
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _speechRecognitionDownloadMessage = null;
+      _speechRecognitionError =
+          'Speech-recognition download progress stream error: $error';
+    });
+  }
+
+  void _handleSpeechRecognitionStreamError(Object error) {
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _isRunningSpeechRecognition = false;
+      _isStoppingSpeechRecognition = false;
+      _speechRecognitionSessionStatus = 'Error';
+      _speechRecognitionError =
+          'Speech-recognition result stream error: $error';
+    });
+  }
+
   int? _readInteger(dynamic value) {
     return value is int ? value : null;
   }
@@ -2248,6 +2679,23 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
 
   Color _imageDescriptionStatusColor(ColorScheme colors) {
     switch (_imageDescriptionStatus) {
+      case 'AVAILABLE':
+        return Colors.green;
+      case 'DOWNLOADABLE':
+        return Colors.orange;
+      case 'DOWNLOADING':
+      case 'CHECKING':
+        return colors.primary;
+      case 'UNAVAILABLE':
+      case 'ERROR':
+        return colors.error;
+      default:
+        return colors.outline;
+    }
+  }
+
+  Color _speechRecognitionStatusColor(ColorScheme colors) {
+    switch (_speechRecognitionStatus) {
       case 'AVAILABLE':
         return Colors.green;
       case 'DOWNLOADABLE':
@@ -2366,6 +2814,7 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
     final rewritingStatusColor = _rewritingStatusColor(colors);
     final proofreadingStatusColor = _proofreadingStatusColor(colors);
     final imageDescriptionStatusColor = _imageDescriptionStatusColor(colors);
+    final speechRecognitionStatusColor = _speechRecognitionStatusColor(colors);
     final maxOutputTokens = int.tryParse(_maxOutputTokensController.text);
     final hasValidMaxOutputTokens =
         maxOutputTokens != null &&
@@ -2390,12 +2839,24 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
             _imageDescriptionTestImageHeight! > 0
         ? _imageDescriptionTestImageWidth! / _imageDescriptionTestImageHeight!
         : 3 / 2;
+    final isOtherGenAiOperationInProgress =
+        _isStartingDownload ||
+        _isRunningPrompt ||
+        _isStartingSummarizationDownload ||
+        _isRunningSummarization ||
+        _isStartingRewritingDownload ||
+        _isRunningRewriting ||
+        _isStartingProofreadingDownload ||
+        _isRunningProofreading ||
+        _isStartingImageDescriptionDownload ||
+        _isRunningImageDescription;
 
     double? progress;
     double? summarizationProgress;
     double? rewritingProgress;
     double? proofreadingProgress;
     double? imageDescriptionProgress;
+    double? speechRecognitionProgress;
 
     if (_downloadedBytes != null && _totalBytes != null && _totalBytes! > 0) {
       progress = (_downloadedBytes! / _totalBytes!).clamp(0.0, 1.0).toDouble();
@@ -2432,6 +2893,15 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
         _imageDescriptionTotalBytes! > 0) {
       imageDescriptionProgress =
           (_imageDescriptionDownloadedBytes! / _imageDescriptionTotalBytes!)
+              .clamp(0.0, 1.0)
+              .toDouble();
+    }
+
+    if (_speechRecognitionDownloadedBytes != null &&
+        _speechRecognitionTotalBytes != null &&
+        _speechRecognitionTotalBytes! > 0) {
+      speechRecognitionProgress =
+          (_speechRecognitionDownloadedBytes! / _speechRecognitionTotalBytes!)
               .clamp(0.0, 1.0)
               .toDouble();
     }
@@ -3926,6 +4396,254 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
                           style: TextStyle(color: colors.error),
                         ),
                       ],
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 40),
+              Text(
+                'Dedicated speech recognition test',
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Uses the ML Kit GenAI Speech Recognition API in Advanced '
+                'mode with the en-US locale and live microphone input. Speak '
+                'the fixed phrase below, then stop the session.',
+              ),
+              const SizedBox(height: 20),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: speechRecognitionStatusColor.withValues(
+                            alpha: 0.12,
+                          ),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: speechRecognitionStatusColor,
+                          ),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                          child: Text(
+                            _speechRecognitionStatus,
+                            style: TextStyle(
+                              color: speechRecognitionStatusColor,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      SelectableText(_speechRecognitionDescription),
+                      const SizedBox(height: 8),
+                      const Text('Mode: Advanced · Locale: en-US'),
+                      if (_speechRecognitionError != null) ...[
+                        const SizedBox(height: 16),
+                        SelectableText(
+                          _speechRecognitionError!,
+                          style: TextStyle(color: colors.error),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed:
+                    _isCheckingSpeechRecognition ||
+                        _isStartingSpeechRecognitionDownload ||
+                        _isStartingSpeechRecognition ||
+                        _isRunningSpeechRecognition ||
+                        isOtherGenAiOperationInProgress
+                    ? null
+                    : _checkSpeechRecognitionStatus,
+                icon: _isCheckingSpeechRecognition
+                    ? const SizedBox.square(
+                        dimension: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.mic_none),
+                label: Text(
+                  _isCheckingSpeechRecognition
+                      ? 'Checking…'
+                      : 'Check speech recognition status',
+                ),
+              ),
+              if (_speechRecognitionStatus == 'DOWNLOADABLE') ...[
+                const SizedBox(height: 12),
+                FilledButton.tonalIcon(
+                  onPressed:
+                      _isStartingSpeechRecognitionDownload ||
+                          _isStartingSpeechRecognition ||
+                          _isRunningSpeechRecognition ||
+                          isOtherGenAiOperationInProgress
+                      ? null
+                      : _startSpeechRecognitionDownload,
+                  icon: _isStartingSpeechRecognitionDownload
+                      ? const SizedBox.square(
+                          dimension: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.download),
+                  label: Text(
+                    _isStartingSpeechRecognitionDownload
+                        ? 'Starting download…'
+                        : 'Download speech-recognition assets',
+                  ),
+                ),
+              ],
+              if (_speechRecognitionDownloadMessage != null) ...[
+                const SizedBox(height: 16),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (_speechRecognitionStatus == 'DOWNLOADING' ||
+                            _isStartingSpeechRecognitionDownload) ...[
+                          LinearProgressIndicator(
+                            value: speechRecognitionProgress,
+                          ),
+                          const SizedBox(height: 12),
+                        ] else if (_speechRecognitionStatus == 'AVAILABLE') ...[
+                          const Align(
+                            alignment: Alignment.centerLeft,
+                            child: Icon(
+                              Icons.check_circle,
+                              color: Colors.green,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                        ],
+                        Text(_speechRecognitionDownloadMessage!),
+                        if (_speechRecognitionDownloadedBytes != null) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            _speechRecognitionTotalBytes != null &&
+                                    _speechRecognitionTotalBytes! > 0
+                                ? '${_formatBytes(_speechRecognitionDownloadedBytes!)} of '
+                                      '${_formatBytes(_speechRecognitionTotalBytes!)}'
+                                : _formatBytes(
+                                    _speechRecognitionDownloadedBytes!,
+                                  ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 24),
+              const Text(
+                'Fixed phrase to speak:',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 12),
+              const Card(
+                child: Padding(
+                  padding: EdgeInsets.all(20),
+                  child: SelectableText(_speechRecognitionTestPhrase),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  FilledButton.icon(
+                    onPressed:
+                        _speechRecognitionStatus == 'AVAILABLE' &&
+                            !_isStartingSpeechRecognition &&
+                            !_isStoppingSpeechRecognition &&
+                            !_isRunningSpeechRecognition &&
+                            !_isStartingSpeechRecognitionDownload &&
+                            !isOtherGenAiOperationInProgress
+                        ? _startSpeechRecognition
+                        : null,
+                    icon: _isStartingSpeechRecognition
+                        ? const SizedBox.square(
+                            dimension: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.mic),
+                    label: Text(
+                      _isStartingSpeechRecognition
+                          ? 'Starting…'
+                          : 'Start listening',
+                    ),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed:
+                        _isRunningSpeechRecognition &&
+                            !_isStoppingSpeechRecognition
+                        ? _stopSpeechRecognition
+                        : null,
+                    icon: _isStoppingSpeechRecognition
+                        ? const SizedBox.square(
+                            dimension: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.stop),
+                    label: Text(
+                      _isStoppingSpeechRecognition ? 'Stopping…' : 'Stop',
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        'Status: $_speechRecognitionSessionStatus',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      if (_speechRecognitionElapsedMilliseconds != null) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          'Session time: '
+                          '${_formatElapsedTime(_speechRecognitionElapsedMilliseconds!)}',
+                        ),
+                      ],
+                      const SizedBox(height: 16),
+                      const Text(
+                        'Final committed transcription:',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
+                      SelectableText(
+                        _speechRecognitionFinalText.isEmpty
+                            ? 'No final text yet.'
+                            : _speechRecognitionFinalText,
+                      ),
+                      const SizedBox(height: 16),
+                      const Text(
+                        'Live partial transcription:',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
+                      SelectableText(
+                        _speechRecognitionPartialText.isEmpty
+                            ? (_isRunningSpeechRecognition
+                                  ? 'Listening for speech…'
+                                  : 'No partial text.')
+                            : _speechRecognitionPartialText,
+                        style: TextStyle(color: colors.secondary),
+                      ),
                     ],
                   ),
                 ),

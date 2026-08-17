@@ -1,5 +1,7 @@
 package com.mycarejournals.nano_lab
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -9,8 +11,10 @@ import android.graphics.Path
 import android.os.Build
 import android.os.SystemClock
 import com.google.mlkit.genai.common.DownloadCallback
+import com.google.mlkit.genai.common.DownloadStatus
 import com.google.mlkit.genai.common.FeatureStatus
 import com.google.mlkit.genai.common.GenAiException
+import com.google.mlkit.genai.common.audio.AudioSource
 import com.google.mlkit.genai.imagedescription.ImageDescriber
 import com.google.mlkit.genai.imagedescription.ImageDescriberOptions
 import com.google.mlkit.genai.imagedescription.ImageDescription
@@ -33,6 +37,12 @@ import com.google.mlkit.genai.summarization.Summarization
 import com.google.mlkit.genai.summarization.SummarizationRequest
 import com.google.mlkit.genai.summarization.Summarizer
 import com.google.mlkit.genai.summarization.SummarizerOptions
+import com.google.mlkit.genai.speechrecognition.SpeechRecognition
+import com.google.mlkit.genai.speechrecognition.SpeechRecognizer
+import com.google.mlkit.genai.speechrecognition.SpeechRecognizerOptions
+import com.google.mlkit.genai.speechrecognition.SpeechRecognizerResponse
+import com.google.mlkit.genai.speechrecognition.speechRecognizerOptions
+import com.google.mlkit.genai.speechrecognition.speechRecognizerRequest
 import com.google.mlkit.genai.rewriting.Rewriter
 import com.google.mlkit.genai.rewriting.RewriterOptions
 import com.google.mlkit.genai.rewriting.Rewriting
@@ -42,8 +52,17 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 import java.io.ByteArrayOutputStream
+import java.util.Locale
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executor
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 
 class MainActivity : FlutterActivity() {
     private companion object {
@@ -60,6 +79,10 @@ class MainActivity : FlutterActivity() {
             "com.mycarejournals.nano_lab/proofreading_download_events"
         const val IMAGE_DESCRIPTION_DOWNLOAD_EVENT_CHANNEL =
             "com.mycarejournals.nano_lab/image_description_download_events"
+        const val SPEECH_RECOGNITION_DOWNLOAD_EVENT_CHANNEL =
+            "com.mycarejournals.nano_lab/speech_recognition_download_events"
+        const val SPEECH_RECOGNITION_EVENT_CHANNEL =
+            "com.mycarejournals.nano_lab/speech_recognition_events"
 
         const val METHOD_GET_PROMPT_STATUS = "getPromptStatus"
         const val METHOD_GET_SYSTEM_INSTRUCTION_STATUS =
@@ -86,11 +109,22 @@ class MainActivity : FlutterActivity() {
         const val METHOD_GET_IMAGE_DESCRIPTION_TEST_IMAGE =
             "getImageDescriptionTestImage"
         const val METHOD_RUN_IMAGE_DESCRIPTION = "runImageDescription"
+        const val METHOD_GET_SPEECH_RECOGNITION_STATUS =
+            "getSpeechRecognitionStatus"
+        const val METHOD_START_SPEECH_RECOGNITION_DOWNLOAD =
+            "startSpeechRecognitionDownload"
+        const val METHOD_REQUEST_SPEECH_RECOGNITION_PERMISSION =
+            "requestSpeechRecognitionPermission"
+        const val METHOD_START_SPEECH_RECOGNITION =
+            "startSpeechRecognition"
+        const val METHOD_STOP_SPEECH_RECOGNITION =
+            "stopSpeechRecognition"
 
         const val SYNTHETIC_IMAGE_ID = "synthetic_house_scene_v1"
         const val SYNTHETIC_IMAGE_WIDTH = 768
         const val SYNTHETIC_IMAGE_HEIGHT = 512
         const val REAL_PHOTO_IMAGE_ID = "real_tabletop_photo_v1"
+        const val RECORD_AUDIO_PERMISSION_REQUEST_CODE = 2026
     }
 
     private lateinit var generativeModel: GenerativeModel
@@ -101,6 +135,9 @@ class MainActivity : FlutterActivity() {
     private lateinit var rewriter: Rewriter
     private lateinit var proofreader: Proofreader
     private lateinit var imageDescriber: ImageDescriber
+    private lateinit var speechRecognizer: SpeechRecognizer
+    private val speechCoroutineScope =
+        CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private var downloadEventSink: EventChannel.EventSink? = null
     private var promptEventSink: EventChannel.EventSink? = null
@@ -108,6 +145,11 @@ class MainActivity : FlutterActivity() {
     private var rewritingDownloadEventSink: EventChannel.EventSink? = null
     private var proofreadingDownloadEventSink: EventChannel.EventSink? = null
     private var imageDescriptionDownloadEventSink: EventChannel.EventSink? = null
+    private var speechRecognitionDownloadEventSink: EventChannel.EventSink? = null
+    private var speechRecognitionEventSink: EventChannel.EventSink? = null
+    private var pendingRecordAudioPermissionResult: MethodChannel.Result? = null
+    private var speechRecognitionDownloadJob: Job? = null
+    private var speechRecognitionJob: Job? = null
 
     @Volatile
     private var isDownloadInProgress = false
@@ -127,11 +169,18 @@ class MainActivity : FlutterActivity() {
     @Volatile
     private var isImageDescriptionDownloadInProgress = false
 
+    @Volatile
+    private var isSpeechRecognitionDownloadInProgress = false
+
+    @Volatile
+    private var isSpeechRecognitionInProgress = false
+
     private var totalDownloadBytes: Long? = null
     private var totalSummarizationDownloadBytes: Long? = null
     private var totalRewritingDownloadBytes: Long? = null
     private var totalProofreadingDownloadBytes: Long? = null
     private var totalImageDescriptionDownloadBytes: Long? = null
+    private var totalSpeechRecognitionDownloadBytes: Long? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -141,6 +190,7 @@ class MainActivity : FlutterActivity() {
         configureRewriter()
         configureProofreader()
         configureImageDescriber()
+        configureSpeechRecognizer()
 
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
@@ -218,6 +268,16 @@ class MainActivity : FlutterActivity() {
                         call.argument<String>("imageId"),
                         result,
                     )
+                METHOD_GET_SPEECH_RECOGNITION_STATUS ->
+                    checkSpeechRecognitionStatus(result)
+                METHOD_START_SPEECH_RECOGNITION_DOWNLOAD ->
+                    startSpeechRecognitionDownload(result)
+                METHOD_REQUEST_SPEECH_RECOGNITION_PERMISSION ->
+                    requestSpeechRecognitionPermission(result)
+                METHOD_START_SPEECH_RECOGNITION ->
+                    startSpeechRecognition(result)
+                METHOD_STOP_SPEECH_RECOGNITION ->
+                    stopSpeechRecognition(result)
                 else -> result.notImplemented()
             }
         }
@@ -329,6 +389,42 @@ class MainActivity : FlutterActivity() {
                 }
             },
         )
+
+        EventChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            SPEECH_RECOGNITION_DOWNLOAD_EVENT_CHANNEL,
+        ).setStreamHandler(
+            object : EventChannel.StreamHandler {
+                override fun onListen(
+                    arguments: Any?,
+                    events: EventChannel.EventSink?,
+                ) {
+                    speechRecognitionDownloadEventSink = events
+                }
+
+                override fun onCancel(arguments: Any?) {
+                    speechRecognitionDownloadEventSink = null
+                }
+            },
+        )
+
+        EventChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            SPEECH_RECOGNITION_EVENT_CHANNEL,
+        ).setStreamHandler(
+            object : EventChannel.StreamHandler {
+                override fun onListen(
+                    arguments: Any?,
+                    events: EventChannel.EventSink?,
+                ) {
+                    speechRecognitionEventSink = events
+                }
+
+                override fun onCancel(arguments: Any?) {
+                    speechRecognitionEventSink = null
+                }
+            },
+        )
     }
 
     private fun configureGenerativeModel(
@@ -386,6 +482,16 @@ class MainActivity : FlutterActivity() {
         imageDescriber = ImageDescription.getClient(options)
     }
 
+    private fun configureSpeechRecognizer() {
+        val options =
+            speechRecognizerOptions {
+                locale = Locale.US
+                preferredMode = SpeechRecognizerOptions.Mode.MODE_ADVANCED
+            }
+
+        speechRecognizer = SpeechRecognition.getClient(options)
+    }
+
     private fun setModelReleaseStage(
         requestedStage: String?,
         result: MethodChannel.Result,
@@ -396,7 +502,8 @@ class MainActivity : FlutterActivity() {
                 isSummarizationDownloadInProgress ||
                 isRewritingDownloadInProgress ||
                 isProofreadingDownloadInProgress ||
-                isImageDescriptionDownloadInProgress
+                isImageDescriptionDownloadInProgress ||
+                isSpeechRecognitionDownloadInProgress
         ) {
             result.error(
                 "MODEL_CHANGE_BLOCKED",
@@ -474,11 +581,13 @@ class MainActivity : FlutterActivity() {
 
     private fun startPromptDownload(result: MethodChannel.Result) {
         if (
+                isInferenceInProgress ||
                 isDownloadInProgress ||
                 isSummarizationDownloadInProgress ||
                 isRewritingDownloadInProgress ||
                 isProofreadingDownloadInProgress ||
-                isImageDescriptionDownloadInProgress
+                isImageDescriptionDownloadInProgress ||
+                isSpeechRecognitionDownloadInProgress
         ) {
             result.error(
                 "DOWNLOAD_ALREADY_RUNNING",
@@ -581,11 +690,13 @@ class MainActivity : FlutterActivity() {
 
     private fun startSummarizationDownload(result: MethodChannel.Result) {
         if (
+                isInferenceInProgress ||
                 isDownloadInProgress ||
                 isSummarizationDownloadInProgress ||
                 isRewritingDownloadInProgress ||
                 isProofreadingDownloadInProgress ||
-                isImageDescriptionDownloadInProgress
+                isImageDescriptionDownloadInProgress ||
+                isSpeechRecognitionDownloadInProgress
         ) {
             result.error(
                 "DOWNLOAD_ALREADY_RUNNING",
@@ -754,11 +865,13 @@ class MainActivity : FlutterActivity() {
 
     private fun startRewritingDownload(result: MethodChannel.Result) {
         if (
+                isInferenceInProgress ||
                 isDownloadInProgress ||
                 isSummarizationDownloadInProgress ||
                 isRewritingDownloadInProgress ||
                 isProofreadingDownloadInProgress ||
-                isImageDescriptionDownloadInProgress
+                isImageDescriptionDownloadInProgress ||
+                isSpeechRecognitionDownloadInProgress
         ) {
             result.error(
                 "DOWNLOAD_ALREADY_RUNNING",
@@ -920,11 +1033,13 @@ class MainActivity : FlutterActivity() {
 
     private fun startProofreadingDownload(result: MethodChannel.Result) {
         if (
-            isDownloadInProgress ||
+            isInferenceInProgress ||
+                isDownloadInProgress ||
                 isSummarizationDownloadInProgress ||
                 isRewritingDownloadInProgress ||
                 isProofreadingDownloadInProgress ||
-                isImageDescriptionDownloadInProgress
+                isImageDescriptionDownloadInProgress ||
+                isSpeechRecognitionDownloadInProgress
         ) {
             result.error(
                 "DOWNLOAD_ALREADY_RUNNING",
@@ -1088,11 +1203,13 @@ class MainActivity : FlutterActivity() {
 
     private fun startImageDescriptionDownload(result: MethodChannel.Result) {
         if (
-            isDownloadInProgress ||
+            isInferenceInProgress ||
+                isDownloadInProgress ||
                 isSummarizationDownloadInProgress ||
                 isRewritingDownloadInProgress ||
                 isProofreadingDownloadInProgress ||
-                isImageDescriptionDownloadInProgress
+                isImageDescriptionDownloadInProgress ||
+                isSpeechRecognitionDownloadInProgress
         ) {
             result.error(
                 "DOWNLOAD_ALREADY_RUNNING",
@@ -1305,6 +1422,353 @@ class MainActivity : FlutterActivity() {
             bitmap.recycle()
             sendImageDescriptionInferenceError(result, error, startedAt)
         }
+    }
+
+    private fun checkSpeechRecognitionStatus(result: MethodChannel.Result) {
+        speechCoroutineScope.launch {
+            try {
+                val status = speechRecognizer.checkStatus()
+                runOnUiThread {
+                    result.success(createSpeechRecognitionStatusResult(status))
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    sendSpeechRecognitionStatusError(result, error)
+                }
+            }
+        }
+    }
+
+    private fun startSpeechRecognitionDownload(result: MethodChannel.Result) {
+        if (
+            isInferenceInProgress ||
+                isDownloadInProgress ||
+                isSummarizationDownloadInProgress ||
+                isRewritingDownloadInProgress ||
+                isProofreadingDownloadInProgress ||
+                isImageDescriptionDownloadInProgress ||
+                isSpeechRecognitionDownloadInProgress
+        ) {
+            result.error(
+                "DOWNLOAD_ALREADY_RUNNING",
+                "A Gemini Nano operation is already running.",
+                null,
+            )
+            return
+        }
+
+        if (speechRecognitionDownloadEventSink == null) {
+            result.error(
+                "SPEECH_RECOGNITION_DOWNLOAD_LISTENER_MISSING",
+                "Flutter is not ready to receive speech-recognition download progress.",
+                null,
+            )
+            return
+        }
+
+        isInferenceInProgress = true
+        isSpeechRecognitionDownloadInProgress = true
+        totalSpeechRecognitionDownloadBytes = null
+
+        speechRecognitionDownloadJob =
+            speechCoroutineScope.launch {
+                try {
+                    speechRecognizer.download().collect { status ->
+                        when (status) {
+                            is DownloadStatus.DownloadStarted -> {
+                                totalSpeechRecognitionDownloadBytes =
+                                    status.bytesToDownload
+                                sendSpeechRecognitionDownloadEvent(
+                                    mapOf(
+                                        "event" to "started",
+                                        "totalBytes" to status.bytesToDownload,
+                                    ),
+                                )
+                            }
+
+                            is DownloadStatus.DownloadProgress -> {
+                                sendSpeechRecognitionDownloadEvent(
+                                    mapOf(
+                                        "event" to "progress",
+                                        "downloadedBytes" to
+                                            status.totalBytesDownloaded,
+                                        "totalBytes" to
+                                            totalSpeechRecognitionDownloadBytes,
+                                    ),
+                                )
+                            }
+
+                            is DownloadStatus.DownloadCompleted -> {
+                                isSpeechRecognitionDownloadInProgress = false
+                                sendSpeechRecognitionDownloadEvent(
+                                    mapOf(
+                                        "event" to "completed",
+                                        "downloadedBytes" to
+                                            totalSpeechRecognitionDownloadBytes,
+                                        "totalBytes" to
+                                            totalSpeechRecognitionDownloadBytes,
+                                    ),
+                                )
+                            }
+
+                            is DownloadStatus.DownloadFailed -> {
+                                isSpeechRecognitionDownloadInProgress = false
+                                sendSpeechRecognitionDownloadFailure(status.e)
+                            }
+                        }
+                    }
+                } catch (_: CancellationException) {
+                    isSpeechRecognitionDownloadInProgress = false
+                    isInferenceInProgress = false
+                } catch (error: Exception) {
+                    isSpeechRecognitionDownloadInProgress = false
+                    isInferenceInProgress = false
+                    sendSpeechRecognitionDownloadFailure(error)
+                } finally {
+                    isSpeechRecognitionDownloadInProgress = false
+                    isInferenceInProgress = false
+                    speechRecognitionDownloadJob = null
+                }
+            }
+
+        result.success(mapOf("started" to true))
+    }
+
+    private fun requestSpeechRecognitionPermission(result: MethodChannel.Result) {
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            result.success(mapOf("granted" to true))
+            return
+        }
+
+        if (pendingRecordAudioPermissionResult != null) {
+            result.error(
+                "RECORD_AUDIO_PERMISSION_PENDING",
+                "The microphone permission request is already open.",
+                null,
+            )
+            return
+        }
+
+        pendingRecordAudioPermissionResult = result
+        requestPermissions(
+            arrayOf(Manifest.permission.RECORD_AUDIO),
+            RECORD_AUDIO_PERMISSION_REQUEST_CODE,
+        )
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+
+        if (requestCode != RECORD_AUDIO_PERMISSION_REQUEST_CODE) {
+            return
+        }
+
+        val permissionResult = pendingRecordAudioPermissionResult
+        pendingRecordAudioPermissionResult = null
+        val granted =
+            grantResults.isNotEmpty() &&
+                grantResults[0] == PackageManager.PERMISSION_GRANTED
+
+        permissionResult?.success(
+            mapOf(
+                "granted" to granted,
+                "canAskAgain" to
+                    shouldShowRequestPermissionRationale(
+                        Manifest.permission.RECORD_AUDIO,
+                    ),
+            ),
+        )
+    }
+
+    private fun startSpeechRecognition(result: MethodChannel.Result) {
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            result.error(
+                "RECORD_AUDIO_PERMISSION_REQUIRED",
+                "Microphone permission is required for this test.",
+                null,
+            )
+            return
+        }
+
+        if (speechRecognitionEventSink == null) {
+            result.error(
+                "SPEECH_RECOGNITION_LISTENER_MISSING",
+                "Flutter is not ready to receive speech-recognition results.",
+                null,
+            )
+            return
+        }
+
+        if (
+            isInferenceInProgress ||
+                isDownloadInProgress ||
+                isSummarizationDownloadInProgress ||
+                isRewritingDownloadInProgress ||
+                isProofreadingDownloadInProgress ||
+                isImageDescriptionDownloadInProgress ||
+                isSpeechRecognitionDownloadInProgress
+        ) {
+            result.error(
+                "INFERENCE_ALREADY_RUNNING",
+                "A Gemini Nano operation is already running.",
+                null,
+            )
+            return
+        }
+
+        isInferenceInProgress = true
+        isSpeechRecognitionInProgress = true
+        val startedAt = SystemClock.elapsedRealtime()
+
+        sendSpeechRecognitionEvent(
+            mapOf(
+                "event" to "started",
+                "mode" to "ADVANCED",
+                "locale" to "en-US",
+                "elapsedMilliseconds" to 0L,
+            ),
+        )
+
+        speechRecognitionJob =
+            speechCoroutineScope.launch {
+                var finalTranscript = ""
+                var terminalResponseReceived = false
+
+                try {
+                    val request =
+                        speechRecognizerRequest {
+                            audioSource = AudioSource.fromMic()
+                        }
+
+                    speechRecognizer.startRecognition(request).collect { response ->
+                        if (terminalResponseReceived) {
+                            return@collect
+                        }
+
+                        val elapsedMilliseconds =
+                            SystemClock.elapsedRealtime() - startedAt
+
+                        when (response) {
+                            is SpeechRecognizerResponse.PartialTextResponse -> {
+                                sendSpeechRecognitionEvent(
+                                    mapOf(
+                                        "event" to "partial",
+                                        "text" to response.text,
+                                        "finalText" to finalTranscript,
+                                        "elapsedMilliseconds" to elapsedMilliseconds,
+                                    ),
+                                )
+                            }
+
+                            is SpeechRecognizerResponse.FinalTextResponse -> {
+                                finalTranscript =
+                                    "${finalTranscript.trim()} ${response.text.trim()}".trim()
+                                sendSpeechRecognitionEvent(
+                                    mapOf(
+                                        "event" to "final",
+                                        "text" to response.text,
+                                        "finalText" to finalTranscript,
+                                        "elapsedMilliseconds" to elapsedMilliseconds,
+                                    ),
+                                )
+                            }
+
+                            is SpeechRecognizerResponse.CompletedResponse -> {
+                                terminalResponseReceived = true
+                                finishSpeechRecognition()
+                                sendSpeechRecognitionEvent(
+                                    mapOf(
+                                        "event" to "completed",
+                                        "finalText" to finalTranscript,
+                                        "elapsedMilliseconds" to elapsedMilliseconds,
+                                    ),
+                                )
+                            }
+
+                            is SpeechRecognizerResponse.ErrorResponse -> {
+                                terminalResponseReceived = true
+                                finishSpeechRecognition()
+                                sendSpeechRecognitionFailure(
+                                    response.e,
+                                    finalTranscript,
+                                    startedAt,
+                                )
+                            }
+                        }
+                    }
+
+                    if (!terminalResponseReceived) {
+                        finishSpeechRecognition()
+                        sendSpeechRecognitionEvent(
+                            mapOf(
+                                "event" to "completed",
+                                "finalText" to finalTranscript,
+                                "elapsedMilliseconds" to
+                                    SystemClock.elapsedRealtime() - startedAt,
+                            ),
+                        )
+                    }
+                } catch (_: CancellationException) {
+                    finishSpeechRecognition()
+                } catch (error: Exception) {
+                    finishSpeechRecognition()
+                    sendSpeechRecognitionFailure(
+                        error,
+                        finalTranscript,
+                        startedAt,
+                    )
+                } finally {
+                    speechRecognitionJob = null
+                }
+            }
+
+        result.success(
+            mapOf(
+                "started" to true,
+                "mode" to "ADVANCED",
+                "locale" to "en-US",
+            ),
+        )
+    }
+
+    private fun stopSpeechRecognition(result: MethodChannel.Result) {
+        if (!isSpeechRecognitionInProgress) {
+            result.success(mapOf("stopping" to false))
+            return
+        }
+
+        sendSpeechRecognitionEvent(mapOf("event" to "stopping"))
+
+        speechCoroutineScope.launch {
+            try {
+                speechRecognizer.stopRecognition()
+                runOnUiThread {
+                    result.success(mapOf("stopping" to true))
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    val cause = unwrapExecutionError(error)
+                    result.error(
+                        "SPEECH_RECOGNITION_STOP_FAILED",
+                        cause.message ?: cause.toString(),
+                        null,
+                    )
+                }
+            }
+        }
+    }
+
+    private fun finishSpeechRecognition() {
+        isSpeechRecognitionInProgress = false
+        isInferenceInProgress = false
     }
 
     private fun isSupportedImageDescriptionTestImage(imageId: String): Boolean {
@@ -1662,6 +2126,67 @@ class MainActivity : FlutterActivity() {
         runOnUiThread {
             imageDescriptionDownloadEventSink?.success(event)
         }
+    }
+
+    private fun sendSpeechRecognitionDownloadEvent(event: Map<String, Any?>) {
+        runOnUiThread {
+            speechRecognitionDownloadEventSink?.success(event)
+        }
+    }
+
+    private fun sendSpeechRecognitionEvent(event: Map<String, Any?>) {
+        runOnUiThread {
+            speechRecognitionEventSink?.success(event)
+        }
+    }
+
+    private fun sendSpeechRecognitionDownloadFailure(error: Exception) {
+        val cause = unwrapExecutionError(error)
+        val event =
+            if (cause is GenAiException) {
+                mapOf(
+                    "event" to "failed",
+                    "message" to
+                        (cause.message ?: "Speech-recognition asset download failed."),
+                    "errorCode" to cause.errorCode,
+                )
+            } else {
+                mapOf(
+                    "event" to "failed",
+                    "message" to (cause.message ?: cause.toString()),
+                )
+            }
+
+        sendSpeechRecognitionDownloadEvent(event)
+    }
+
+    private fun sendSpeechRecognitionFailure(
+        error: Exception,
+        finalTranscript: String,
+        startedAt: Long,
+    ) {
+        val cause = unwrapExecutionError(error)
+        val elapsedMilliseconds = SystemClock.elapsedRealtime() - startedAt
+        val event =
+            if (cause is GenAiException) {
+                mapOf(
+                    "event" to "failed",
+                    "message" to
+                        (cause.message ?: "Speech recognition failed."),
+                    "errorCode" to cause.errorCode,
+                    "finalText" to finalTranscript,
+                    "elapsedMilliseconds" to elapsedMilliseconds,
+                )
+            } else {
+                mapOf(
+                    "event" to "failed",
+                    "message" to (cause.message ?: cause.toString()),
+                    "finalText" to finalTranscript,
+                    "elapsedMilliseconds" to elapsedMilliseconds,
+                )
+            }
+
+        sendSpeechRecognitionEvent(event)
     }
 
     private fun sendPromptFailure(
@@ -2104,6 +2629,53 @@ class MainActivity : FlutterActivity() {
         )
     }
 
+    private fun createSpeechRecognitionStatusResult(
+        status: Int,
+    ): Map<String, Any> {
+        val statusName: String
+        val description: String
+
+        when (status) {
+            FeatureStatus.AVAILABLE -> {
+                statusName = "AVAILABLE"
+                description =
+                    "Advanced en-US speech recognition is ready to use."
+            }
+
+            FeatureStatus.DOWNLOADABLE -> {
+                statusName = "DOWNLOADABLE"
+                description =
+                    "This device supports Advanced en-US speech recognition, but its required assets need to be downloaded."
+            }
+
+            FeatureStatus.DOWNLOADING -> {
+                statusName = "DOWNLOADING"
+                description =
+                    "The required speech-recognition assets are currently downloading."
+            }
+
+            FeatureStatus.UNAVAILABLE -> {
+                statusName = "UNAVAILABLE"
+                description =
+                    "Advanced en-US speech recognition is unavailable on this device or AICore is not ready."
+            }
+
+            else -> {
+                statusName = "UNKNOWN"
+                description =
+                    "The Speech Recognition API returned an unrecognized status value: $status."
+            }
+        }
+
+        return mapOf(
+            "status" to statusName,
+            "description" to description,
+            "statusCode" to status,
+            "mode" to "ADVANCED",
+            "locale" to "en-US",
+        )
+    }
+
     private fun sendStatusError(
         result: MethodChannel.Result,
         error: Exception,
@@ -2230,6 +2802,27 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun sendSpeechRecognitionStatusError(
+        result: MethodChannel.Result,
+        error: Exception,
+    ) {
+        val cause = unwrapExecutionError(error)
+
+        if (cause is GenAiException) {
+            result.error(
+                "GENAI_SPEECH_RECOGNITION_STATUS_${cause.errorCode}",
+                cause.message ?: "Speech-recognition status detection failed.",
+                mapOf("errorCode" to cause.errorCode),
+            )
+        } else {
+            result.error(
+                "SPEECH_RECOGNITION_STATUS_FAILED",
+                cause.message ?: cause.toString(),
+                null,
+            )
+        }
+    }
+
     private fun sendTokenInfoError(
         result: MethodChannel.Result,
         error: Exception,
@@ -2266,6 +2859,20 @@ class MainActivity : FlutterActivity() {
         rewritingDownloadEventSink = null
         proofreadingDownloadEventSink = null
         imageDescriptionDownloadEventSink = null
+        speechRecognitionDownloadEventSink = null
+        speechRecognitionEventSink = null
+        pendingRecordAudioPermissionResult = null
+
+        speechRecognitionJob?.cancel()
+        speechRecognitionDownloadJob?.cancel()
+        finishSpeechRecognition()
+        isSpeechRecognitionDownloadInProgress = false
+
+        if (::speechRecognizer.isInitialized) {
+            speechRecognizer.close()
+        }
+
+        speechCoroutineScope.cancel()
 
         if (::generativeModel.isInitialized) {
             generativeModel.close()
