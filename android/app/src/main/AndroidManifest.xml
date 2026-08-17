@@ -12,7 +12,7 @@
         tools:node="remove" />
 
     <application
-        android:label="nano_lab"
+        android:label="Nano Lab"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

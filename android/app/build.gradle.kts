@@ -27,6 +27,11 @@ android {
 
     buildTypes {
         release {
+            // ML Kit GenAI's Image Description client currently crashes when
+            // release shrinking/obfuscation is enabled.
+            isMinifyEnabled = false
+            isShrinkResources = false
+
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
