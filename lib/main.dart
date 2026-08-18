@@ -500,7 +500,10 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
           _status = 'ERROR';
           _description = 'Kotlin did not select the requested model stage.';
         });
+        return;
       }
+
+      await _checkNanoStatus();
     } on PlatformException catch (error) {
       if (!mounted) {
         return;
