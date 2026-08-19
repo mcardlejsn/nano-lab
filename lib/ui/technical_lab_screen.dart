@@ -135,6 +135,7 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
   Completer<bool>? _promptRunCompletion;
 
   String? _deviceInformation;
+  String? _currentDeviceModel;
   String? _systemInstructionDescription;
   String? _systemInstructionError;
   String? _errorDetails;
@@ -184,6 +185,10 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
       _handlePromptEvent,
       onError: _handlePromptStreamError,
     );
+
+    if (widget.everydayMode) {
+      _loadDeviceInfo();
+    }
 
     if (widget.everydayMode && widget.initialSection == NanoLabSection.prompt) {
       _systemInstructionController.clear();
@@ -255,6 +260,24 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
   void _handleSpeechRecognitionFeatureChanged() {
     if (mounted) {
       setState(() {});
+    }
+  }
+
+  Future<void> _loadDeviceInfo() async {
+    try {
+      final result = await _nativeService.getDeviceInfo();
+      if (!mounted) {
+        return;
+      }
+
+      final model = result?['model']?.toString().trim();
+      if (model != null && model.isNotEmpty) {
+        setState(() {
+          _currentDeviceModel = model;
+        });
+      }
+    } catch (_) {
+      // Device identification is informative and must not block a test.
     }
   }
 
@@ -1222,24 +1245,21 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
             'unsupported details. Review the response rather than treating '
             'it as automatically correct.';
       case NanoLabSection.summarization:
-        return 'On the Pixel 10 Pro, the dedicated summarizer was fast and '
-            'factually sound but repeatedly omitted the article\'s central '
-            'results.';
+        return 'Check whether the summary preserves the article\'s central '
+            'results instead of focusing only on secondary details.';
       case NanoLabSection.rewriting:
-        return 'On the Pixel 10 Pro, rewriting preserved the supplied facts '
-            'but repeatedly added an unrequested sign-off and name placeholder.';
+        return 'Check whether the rewrite preserves every supplied fact '
+            'without adding an unrequested sign-off or placeholder.';
       case NanoLabSection.proofreading:
-        return 'On the Pixel 10 Pro, proofreading corrected every planted '
-            'error, preserved all facts, added nothing, and averaged about '
-            'one second.';
+        return 'Check whether proofreading corrects every planted error while '
+            'preserving all facts and adding nothing.';
       case NanoLabSection.imageDescription:
-        return 'Repeated wording does not guarantee complete recognition. In '
-            'the fixed tests, Nano omitted one prominent object and '
-            'misidentified another.';
+        return 'Check whether the description recognizes every prominent '
+            'object. Repeated wording does not guarantee complete or correct '
+            'recognition.';
       case NanoLabSection.speechRecognition:
-        return 'Speech recognition usually preserved the complete meaning, '
-            'but occasional meaningful substitutions make user review '
-            'important.';
+        return 'Check whether the transcription preserves every important '
+            'detail. Even occasional substitutions make user review important.';
     }
   }
 
@@ -1462,8 +1482,18 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (_currentDeviceModel != null) ...[
+              Text(
+                'Testing on $_currentDeviceModel',
+                style: TextStyle(
+                  color: colors.onSecondaryContainer,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
             Text(
-              'What this means',
+              'What to look for',
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
                 color: colors.onSecondaryContainer,
                 fontWeight: FontWeight.bold,

@@ -93,6 +93,7 @@ class MainActivity : FlutterActivity() {
             "com.mycarejournals.nano_lab/speech_recognition_events"
 
         const val METHOD_GET_PROMPT_STATUS = "getPromptStatus"
+        const val METHOD_GET_DEVICE_INFO = "getDeviceInfo"
         const val METHOD_GET_MEMORY_SNAPSHOT = "getMemorySnapshot"
         const val METHOD_GET_SYSTEM_INSTRUCTION_STATUS =
             "getSystemInstructionStatus"
@@ -207,6 +208,7 @@ class MainActivity : FlutterActivity() {
         ).setMethodCallHandler { call, result ->
             when (call.method) {
                 METHOD_GET_PROMPT_STATUS -> checkPromptStatus(result)
+                METHOD_GET_DEVICE_INFO -> getDeviceInfo(result)
                 METHOD_GET_MEMORY_SNAPSHOT -> getMemorySnapshot(result)
                 METHOD_GET_SYSTEM_INSTRUCTION_STATUS ->
                     checkSystemInstructionStatus(result)
@@ -434,6 +436,19 @@ class MainActivity : FlutterActivity() {
                     speechRecognitionEventSink = null
                 }
             },
+        )
+    }
+
+    private fun getDeviceInfo(result: MethodChannel.Result) {
+        result.success(
+            mapOf(
+                "manufacturer" to Build.MANUFACTURER,
+                "model" to Build.MODEL,
+                "device" to Build.DEVICE,
+                "hardware" to Build.HARDWARE,
+                "androidVersion" to Build.VERSION.RELEASE,
+                "sdkLevel" to Build.VERSION.SDK_INT,
+            ),
         )
     }
 
