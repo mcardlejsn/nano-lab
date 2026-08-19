@@ -187,6 +187,8 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
   bool _isChecking = false;
   bool _isStartingDownload = false;
   bool _isRunningPrompt = false;
+  bool _isRunningTopKComparison = false;
+  int? _topKComparisonStep;
   bool _isCheckingSummarization = false;
   bool _isStartingSummarizationDownload = false;
   bool _isRunningSummarization = false;
@@ -228,6 +230,7 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
   final List<_PromptRun> _completedRuns = <_PromptRun>[];
   int _nextRunNumber = 1;
   int? _activeRunNumber;
+  Completer<bool>? _promptRunCompletion;
 
   String? _deviceInformation;
   String? _systemInstructionDescription;
@@ -382,6 +385,7 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
 
   @override
   void dispose() {
+    _completePromptRun(false);
     _downloadSubscription.cancel();
     _promptSubscription.cancel();
     _summarizationDownloadSubscription.cancel();
@@ -1735,19 +1739,30 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
     }
   }
 
-  Future<void> _runPrompt({_PromptRun? repeatRun}) async {
+  Future<bool> _runPrompt({
+    _PromptRun? repeatRun,
+    double? temperatureOverride,
+    int? seedOverride,
+    int? topKOverride,
+    int? candidateCountOverride,
+    bool waitForCompletion = false,
+  }) async {
     final prompt = repeatRun?.prompt ?? _promptController.text;
     final systemInstruction = repeatRun == null
         ? _systemInstructionController.text
         : (repeatRun.systemInstruction ?? '');
-    final temperature = repeatRun?.temperature ?? _temperature;
+    final temperature =
+        repeatRun?.temperature ?? temperatureOverride ?? _temperature;
     final maxOutputTokens =
         repeatRun?.maxOutputTokens ??
         int.tryParse(_maxOutputTokensController.text);
-    final seed = repeatRun?.seed ?? int.tryParse(_seedController.text);
-    final topK = repeatRun?.topK ?? int.tryParse(_topKController.text);
+    final seed =
+        repeatRun?.seed ?? seedOverride ?? int.tryParse(_seedController.text);
+    final topK =
+        repeatRun?.topK ?? topKOverride ?? int.tryParse(_topKController.text);
     final candidateCount =
         repeatRun?.candidateCount ??
+        candidateCountOverride ??
         int.tryParse(_candidateCountController.text);
     final systemInstructionToSend = systemInstruction.trim().isEmpty
         ? null
@@ -1761,7 +1776,7 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
             'Select ${repeatRun.modelReleaseStage.toLowerCase()} and check '
             'availability before repeating this run.';
       });
-      return;
+      return false;
     }
 
     if (maxOutputTokens == null ||
@@ -1772,7 +1787,7 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
         _promptError =
             'Maximum output tokens must be a whole number from 1 to 4096.';
       });
-      return;
+      return false;
     }
 
     if (seed == null || seed < 0 || seed > 2147483647) {
@@ -1780,7 +1795,7 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
         _promptStatus = 'Error';
         _promptError = 'Seed must be a whole number from 0 to 2147483647.';
       });
-      return;
+      return false;
     }
 
     if (topK == null || topK < 1 || topK > 2147483647) {
@@ -1788,7 +1803,7 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
         _promptStatus = 'Error';
         _promptError = 'Top-K must be a whole number from 1 to 2147483647.';
       });
-      return;
+      return false;
     }
 
     if (candidateCount == null || candidateCount < 1 || candidateCount > 8) {
@@ -1796,8 +1811,11 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
         _promptStatus = 'Error';
         _promptError = 'Candidate count must be a whole number from 1 to 8.';
       });
-      return;
+      return false;
     }
+
+    final promptRunCompletion = waitForCompletion ? Completer<bool>() : null;
+    _promptRunCompletion = promptRunCompletion;
 
     setState(() {
       _isRunningPrompt = true;
@@ -1833,7 +1851,7 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
           });
 
       if (!mounted) {
-        return;
+        return false;
       }
 
       if (tokenResult == null) {
@@ -1842,7 +1860,8 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
           _promptStatus = 'Error';
           _promptError = 'Kotlin returned no token information.';
         });
-        return;
+        _completePromptRun(false);
+        return false;
       }
 
       final nativeTokenPrompt = tokenResult['prompt']?.toString();
@@ -1872,7 +1891,8 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
           _promptError =
               'The token-count request did not match the displayed instructions.';
         });
-        return;
+        _completePromptRun(false);
+        return false;
       }
 
       final requestTokens = _readInteger(tokenResult['requestTokens']);
@@ -1884,7 +1904,8 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
           _promptStatus = 'Error';
           _promptError = 'Kotlin returned incomplete token information.';
         });
-        return;
+        _completePromptRun(false);
+        return false;
       }
 
       setState(() {
@@ -1907,7 +1928,7 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
           });
 
       if (!mounted) {
-        return;
+        return false;
       }
 
       if (result == null) {
@@ -1916,7 +1937,8 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
           _promptStatus = 'Error';
           _promptError = 'Kotlin returned no inference-start information.';
         });
-        return;
+        _completePromptRun(false);
+        return false;
       }
 
       final nativePrompt = result['prompt']?.toString();
@@ -1941,10 +1963,17 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
           _promptError =
               'The native request did not match the displayed instructions.';
         });
+        _completePromptRun(false);
+        return false;
       }
+
+      if (promptRunCompletion != null) {
+        return promptRunCompletion.future;
+      }
+      return true;
     } on PlatformException catch (error) {
       if (!mounted) {
-        return;
+        return false;
       }
 
       setState(() {
@@ -1954,9 +1983,11 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
             '${error.message ?? 'Token counting or Gemini Nano inference could not be started.'}\n'
             'Platform error: ${error.code}';
       });
+      _completePromptRun(false);
+      return false;
     } catch (error) {
       if (!mounted) {
-        return;
+        return false;
       }
 
       setState(() {
@@ -1964,7 +1995,66 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
         _promptStatus = 'Error';
         _promptError = 'Unexpected inference error: $error';
       });
+      _completePromptRun(false);
+      return false;
     }
+  }
+
+  void _completePromptRun(bool succeeded) {
+    final completion = _promptRunCompletion;
+    _promptRunCompletion = null;
+
+    if (completion != null && !completion.isCompleted) {
+      completion.complete(succeeded);
+    }
+  }
+
+  Future<void> _runTopKComparison() async {
+    const topKValues = <int>[1, 3, 10];
+    var allRunsSucceeded = true;
+
+    setState(() {
+      _isRunningTopKComparison = true;
+      _isRunningPrompt = true;
+      _topKComparisonStep = 1;
+      _promptError = null;
+    });
+
+    for (var index = 0; index < topKValues.length; index++) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _topKComparisonStep = index + 1;
+      });
+
+      final succeeded = await _runPrompt(
+        temperatureOverride: 0.7,
+        seedOverride: 123,
+        topKOverride: topKValues[index],
+        candidateCountOverride: 1,
+        waitForCompletion: true,
+      );
+
+      if (!succeeded) {
+        allRunsSucceeded = false;
+        break;
+      }
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _isRunningTopKComparison = false;
+      _isRunningPrompt = false;
+      _topKComparisonStep = null;
+      if (allRunsSucceeded) {
+        _promptStatus = 'Top-K comparison completed';
+      }
+    });
   }
 
   void _clearPromptOutput() {
@@ -2390,6 +2480,7 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
     }
 
     final eventName = event['event']?.toString();
+    bool? promptRunSucceeded;
 
     setState(() {
       switch (eventName) {
@@ -2420,7 +2511,8 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
           break;
 
         case 'completed':
-          _isRunningPrompt = false;
+          _isRunningPrompt = _isRunningTopKComparison;
+          promptRunSucceeded = true;
           final candidateValues = event['candidates'];
           if (candidateValues is List) {
             _candidates = candidateValues
@@ -2495,7 +2587,8 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
           break;
 
         case 'failed':
-          _isRunningPrompt = false;
+          _isRunningPrompt = _isRunningTopKComparison;
+          promptRunSucceeded = false;
           _activeRunNumber = null;
           _promptStatus = 'Error';
           _elapsedMilliseconds = _readInteger(event['elapsedMilliseconds']);
@@ -2505,6 +2598,10 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
           break;
       }
     });
+
+    if (promptRunSucceeded != null) {
+      _completePromptRun(promptRunSucceeded!);
+    }
   }
 
   void _handleDownloadStreamError(Object error) {
@@ -2528,6 +2625,7 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
       _promptStatus = 'Error';
       _promptError = 'Prompt output stream error: $error';
     });
+    _completePromptRun(false);
   }
 
   void _handleSummarizationDownloadStreamError(Object error) {
@@ -3246,6 +3344,55 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
                       )
                     : const Icon(Icons.play_arrow),
                 label: Text(_isRunningPrompt ? 'Generating…' : 'Run prompt'),
+              ),
+              const SizedBox(height: 16),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Text(
+                        'Top-K comparison',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Runs the current prompt three times with Top-K 1, 3, '
+                        'and 10. Temperature stays at 0.7, seed at 123, and '
+                        'candidate count at 1 so Top-K is the only setting '
+                        'that changes.',
+                      ),
+                      const SizedBox(height: 16),
+                      FilledButton.tonalIcon(
+                        onPressed:
+                            _status == 'AVAILABLE' &&
+                                !_isRunningPrompt &&
+                                !_isRunningSummarization &&
+                                !_isRunningRewriting &&
+                                !_isRunningProofreading &&
+                                !_isRunningImageDescription &&
+                                hasValidMaxOutputTokens &&
+                                _promptController.text.trim().isNotEmpty
+                            ? _runTopKComparison
+                            : null,
+                        icon: _isRunningTopKComparison
+                            ? const SizedBox.square(
+                                dimension: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.compare_arrows),
+                        label: Text(
+                          _isRunningTopKComparison
+                              ? 'Running ${_topKComparisonStep ?? 1} of 3…'
+                              : 'Run Top-K comparison',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
               const SizedBox(height: 12),
               FilledButton.tonalIcon(
