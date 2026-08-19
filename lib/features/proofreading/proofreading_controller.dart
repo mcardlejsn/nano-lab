@@ -40,6 +40,10 @@ class ProofreadingController extends ChangeNotifier {
 
   bool _isDisposed = false;
 
+  void inputChanged() {
+    _change(() {});
+  }
+
   Future<void> checkStatus() async {
     _change(() {
       isChecking = true;

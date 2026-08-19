@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../features/proofreading/proofreading_controller.dart';
+import '../features/proofreading/proofreading_experiment.dart';
 import '../services/nano_native_service.dart';
 import 'nano_lab_section.dart';
 
@@ -2422,22 +2423,6 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
     }
   }
 
-  Color _proofreadingStatusColor(ColorScheme colors) {
-    switch (_proofreadingFeature.status) {
-      case 'AVAILABLE':
-        return Colors.green;
-      case 'DOWNLOADABLE':
-        return Colors.orange;
-      case 'DOWNLOADING':
-        return Colors.blue;
-      case 'UNAVAILABLE':
-      case 'ERROR':
-        return colors.error;
-      default:
-        return colors.outline;
-    }
-  }
-
   Color _imageDescriptionStatusColor(ColorScheme colors) {
     switch (_imageDescriptionStatus) {
       case 'AVAILABLE':
@@ -3173,46 +3158,9 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
 
       case NanoLabSection.proofreading:
         return [
-          _buildEverydayReadinessCard(
-            status: _proofreadingFeature.status,
-            description: _proofreadingFeature.description,
-            isChecking: _proofreadingFeature.isChecking,
-            onCheck: _proofreadingFeature.checkStatus,
-            isStartingDownload: _proofreadingFeature.isStartingDownload,
-            onDownload: _proofreadingFeature.startDownload,
-            error: _proofreadingFeature.error,
-            downloadMessage: _proofreadingFeature.downloadMessage,
-            downloadedBytes: _proofreadingFeature.downloadedBytes,
-            totalBytes: _proofreadingFeature.totalBytes,
-          ),
-          const SizedBox(height: 12),
-          _buildEverydayInputCard(
-            'Sentence with deliberate mistakes',
-            _proofreadingFeature.inputController.text,
-          ),
-          const SizedBox(height: 12),
-          FilledButton.icon(
-            onPressed:
-                _proofreadingFeature.status == 'AVAILABLE' &&
-                    !_proofreadingFeature.isRunning
-                ? _proofreadingFeature.run
-                : null,
-            icon: _proofreadingFeature.isRunning
-                ? const SizedBox.square(
-                    dimension: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.play_arrow),
-            label: Text(
-              _proofreadingFeature.isRunning
-                  ? 'Proofreading…'
-                  : 'Run proofreading test',
-            ),
-          ),
-          const SizedBox(height: 12),
-          _buildEverydayResultCard(
-            output: _proofreadingFeature.output,
-            elapsedMilliseconds: _proofreadingFeature.elapsedMilliseconds,
+          ProofreadingExperiment(
+            controller: _proofreadingFeature,
+            presentation: ProofreadingPresentation.everyday,
           ),
         ];
 
@@ -3383,7 +3331,6 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
     final statusColor = _statusColor(colors);
     final summarizationStatusColor = _summarizationStatusColor(colors);
     final rewritingStatusColor = _rewritingStatusColor(colors);
-    final proofreadingStatusColor = _proofreadingStatusColor(colors);
     final imageDescriptionStatusColor = _imageDescriptionStatusColor(colors);
     final speechRecognitionStatusColor = _speechRecognitionStatusColor(colors);
     final maxOutputTokens = int.tryParse(_maxOutputTokensController.text);
@@ -3401,9 +3348,6 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
     final hasValidSummarizationInput =
         _summarizationController.text.length > 400;
     final hasValidRewritingInput = _rewritingController.text.trim().isNotEmpty;
-    final hasValidProofreadingInput = _proofreadingFeature.inputController.text
-        .trim()
-        .isNotEmpty;
     final imageDescriptionAspectRatio =
         _imageDescriptionTestImageWidth != null &&
             _imageDescriptionTestImageHeight != null &&
@@ -3425,7 +3369,6 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
     double? progress;
     double? summarizationProgress;
     double? rewritingProgress;
-    double? proofreadingProgress;
     double? imageDescriptionProgress;
     double? speechRecognitionProgress;
 
@@ -3448,16 +3391,6 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
       rewritingProgress = (_rewritingDownloadedBytes! / _rewritingTotalBytes!)
           .clamp(0.0, 1.0)
           .toDouble();
-    }
-
-    if (_proofreadingFeature.downloadedBytes != null &&
-        _proofreadingFeature.totalBytes != null &&
-        _proofreadingFeature.totalBytes! > 0) {
-      proofreadingProgress =
-          (_proofreadingFeature.downloadedBytes! /
-                  _proofreadingFeature.totalBytes!)
-              .clamp(0.0, 1.0)
-              .toDouble();
     }
 
     if (_imageDescriptionDownloadedBytes != null &&
@@ -4593,244 +4526,24 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
                 ),
               ),
               const SizedBox(height: 40),
-              Text(
-                'Dedicated proofreading test',
-                key: _proofreadingSectionKey,
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                'Uses the ML Kit Proofreading API with fixed English keyboard '
-                'input. Official input limit: fewer than 256 tokens.',
-              ),
-              const SizedBox(height: 20),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: proofreadingStatusColor.withValues(
-                            alpha: 0.12,
-                          ),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: proofreadingStatusColor),
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 8,
-                          ),
-                          child: Text(
-                            _proofreadingFeature.status,
-                            style: TextStyle(
-                              color: proofreadingStatusColor,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      SelectableText(_proofreadingFeature.description),
-                      if (_proofreadingFeature.error != null) ...[
-                        const SizedBox(height: 16),
-                        SelectableText(
-                          _proofreadingFeature.error!,
-                          style: TextStyle(color: colors.error),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              FilledButton.icon(
-                onPressed:
-                    _proofreadingFeature.isChecking ||
-                        _proofreadingFeature.isStartingDownload ||
-                        _proofreadingFeature.isRunning ||
-                        _isRunningPrompt ||
-                        _isRunningSummarization ||
-                        _isRunningRewriting ||
-                        _isStartingDownload ||
-                        _isStartingSummarizationDownload ||
-                        _isStartingRewritingDownload ||
-                        _isRunningImageDescription ||
-                        _isStartingImageDescriptionDownload
-                    ? null
-                    : _proofreadingFeature.checkStatus,
-                icon: _proofreadingFeature.isChecking
-                    ? const SizedBox.square(
-                        dimension: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.spellcheck),
-                label: Text(
-                  _proofreadingFeature.isChecking
-                      ? 'Checking…'
-                      : 'Check proofreading status',
-                ),
-              ),
-              if (_proofreadingFeature.status == 'DOWNLOADABLE') ...[
-                const SizedBox(height: 12),
-                FilledButton.tonalIcon(
-                  onPressed:
-                      _proofreadingFeature.isStartingDownload ||
-                          _isStartingDownload ||
-                          _isStartingSummarizationDownload ||
-                          _isStartingRewritingDownload ||
-                          _isRunningPrompt ||
-                          _isRunningSummarization ||
-                          _isRunningRewriting ||
-                          _proofreadingFeature.isRunning ||
-                          _isStartingImageDescriptionDownload ||
-                          _isRunningImageDescription
-                      ? null
-                      : _proofreadingFeature.startDownload,
-                  icon: _proofreadingFeature.isStartingDownload
-                      ? const SizedBox.square(
-                          dimension: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.download),
-                  label: Text(
-                    _proofreadingFeature.isStartingDownload
-                        ? 'Starting download…'
-                        : 'Download proofreading assets',
-                  ),
-                ),
-              ],
-              if (_proofreadingFeature.downloadMessage != null) ...[
-                const SizedBox(height: 16),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(20),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        LinearProgressIndicator(value: proofreadingProgress),
-                        const SizedBox(height: 12),
-                        Text(_proofreadingFeature.downloadMessage!),
-                        if (_proofreadingFeature.downloadedBytes != null) ...[
-                          const SizedBox(height: 8),
-                          Text(
-                            _proofreadingFeature.totalBytes != null &&
-                                    _proofreadingFeature.totalBytes! > 0
-                                ? '${_formatBytes(_proofreadingFeature.downloadedBytes!)} of '
-                                      '${_formatBytes(_proofreadingFeature.totalBytes!)}'
-                                : _formatBytes(
-                                    _proofreadingFeature.downloadedBytes!,
-                                  ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-              const SizedBox(height: 24),
-              const Text('Text to proofread:'),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _proofreadingFeature.inputController,
-                enabled: !_proofreadingFeature.isRunning,
-                minLines: 4,
-                maxLines: 8,
-                onChanged: (_) => setState(() {}),
-                decoration: InputDecoration(
-                  border: const OutlineInputBorder(),
-                  helperText:
-                      '${_proofreadingFeature.inputController.text.length} characters · keep under 256 tokens',
-                ),
-              ),
-              const SizedBox(height: 16),
-              FilledButton.icon(
-                onPressed:
-                    _proofreadingFeature.status == 'AVAILABLE' &&
-                        !_proofreadingFeature.isRunning &&
-                        !_isRunningPrompt &&
-                        !_isRunningSummarization &&
-                        !_isRunningRewriting &&
-                        !_isRunningImageDescription &&
-                        hasValidProofreadingInput
-                    ? _proofreadingFeature.run
-                    : null,
-                icon: _proofreadingFeature.isRunning
-                    ? const SizedBox.square(
-                        dimension: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.play_arrow),
-                label: Text(
-                  _proofreadingFeature.isRunning
-                      ? 'Proofreading…'
-                      : 'Proofread text',
-                ),
-              ),
-              const SizedBox(height: 16),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text(
-                        'Status: ${_proofreadingFeature.isRunning
-                            ? 'Proofreading…'
-                            : _proofreadingFeature.error != null
-                            ? 'Error'
-                            : _proofreadingFeature.output.isNotEmpty
-                            ? 'Completed'
-                            : 'Not run'}',
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      if (_proofreadingFeature.elapsedMilliseconds != null) ...[
-                        const SizedBox(height: 8),
-                        Text(
-                          'Processing time: '
-                          '${_formatElapsedTime(_proofreadingFeature.elapsedMilliseconds!)}',
-                        ),
-                      ],
-                      if (_proofreadingFeature.suggestionCount != null) ...[
-                        const SizedBox(height: 8),
-                        Text(
-                          'Suggestions returned: '
-                          '${_proofreadingFeature.suggestionCount} '
-                          '(showing highest confidence)',
-                        ),
-                      ],
-                      if (_proofreadingFeature.submittedInput != null) ...[
-                        const SizedBox(height: 16),
-                        const Text(
-                          'Exact input sent:',
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 8),
-                        SelectableText(_proofreadingFeature.submittedInput!),
-                      ],
-                      const SizedBox(height: 16),
-                      const Text(
-                        'Output:',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 8),
-                      SelectableText(
-                        _proofreadingFeature.output.isEmpty
-                            ? 'The proofread text will appear here.'
-                            : _proofreadingFeature.output,
-                      ),
-                      if (_proofreadingFeature.error != null) ...[
-                        const SizedBox(height: 16),
-                        SelectableText(
-                          _proofreadingFeature.error!,
-                          style: TextStyle(color: colors.error),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
+              ProofreadingExperiment(
+                controller: _proofreadingFeature,
+                presentation: ProofreadingPresentation.technical,
+                sectionKey: _proofreadingSectionKey,
+                blockStatusActions:
+                    _isRunningPrompt ||
+                    _isRunningSummarization ||
+                    _isRunningRewriting ||
+                    _isStartingDownload ||
+                    _isStartingSummarizationDownload ||
+                    _isStartingRewritingDownload ||
+                    _isRunningImageDescription ||
+                    _isStartingImageDescriptionDownload,
+                blockRun:
+                    _isRunningPrompt ||
+                    _isRunningSummarization ||
+                    _isRunningRewriting ||
+                    _isRunningImageDescription,
               ),
               const SizedBox(height: 40),
               Text(
