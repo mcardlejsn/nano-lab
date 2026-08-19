@@ -6,7 +6,6 @@ import 'package:flutter/services.dart';
 void main() {
   runApp(const NanoLabApp());
 }
-
 class NanoLabApp extends StatelessWidget {
   const NanoLabApp({super.key});
 
@@ -25,9 +24,13 @@ class NanoLabApp extends StatelessWidget {
 }
 
 class _NanoStatusScreen extends StatefulWidget {
-  const _NanoStatusScreen({this.initialSection});
+  const _NanoStatusScreen({
+    this.initialSection,
+    this.everydayMode = false,
+  });
 
   final _NanoLabSection? initialSection;
+  final bool everydayMode;
 
   @override
   State<_NanoStatusScreen> createState() => _NanoStatusScreenState();
@@ -358,6 +361,7 @@ class EverydayUsefulnessScreen extends StatelessWidget {
                         MaterialPageRoute<void>(
                           builder: (_) => _NanoStatusScreen(
                             initialSection: test.section,
+                            everydayMode: true,
                           ),
                         ),
                       );
@@ -975,8 +979,13 @@ class _NanoStatusScreenState extends State<_NanoStatusScreen> {
 
     _loadImageDescriptionTestImage();
 
+    if (widget.everydayMode &&
+        widget.initialSection == _NanoLabSection.prompt) {
+      _systemInstructionController.clear();
+    }
+
     final initialSection = widget.initialSection;
-    if (initialSection != null) {
+    if (!widget.everydayMode && initialSection != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           _jumpToSection(initialSection);
@@ -3549,8 +3558,778 @@ class _NanoStatusScreenState extends State<_NanoStatusScreen> {
     );
   }
 
+  String _everydayTitle(_NanoLabSection section) {
+    switch (section) {
+      case _NanoLabSection.status:
+        return 'Check Offline Readiness';
+      case _NanoLabSection.prompt:
+        return 'Ask Gemini Nano';
+      case _NanoLabSection.summarization:
+        return 'Summarize Something';
+      case _NanoLabSection.rewriting:
+        return 'Rewrite a Message';
+      case _NanoLabSection.proofreading:
+        return 'Fix My Writing';
+      case _NanoLabSection.imageDescription:
+        return 'Understand a Picture';
+      case _NanoLabSection.speechRecognition:
+        return 'Transcribe Speech';
+    }
+  }
+
+  String _everydayIntroduction(_NanoLabSection section) {
+    switch (section) {
+      case _NanoLabSection.status:
+        return 'Check whether Gemini Nano and its required on-device assets '
+            'are ready before testing offline.';
+      case _NanoLabSection.prompt:
+        return 'Give Gemini Nano a short instruction and review how well it '
+            'follows it without using cloud AI.';
+      case _NanoLabSection.summarization:
+        return 'Ask the dedicated on-device summarizer to shorten a fixed '
+            'fictional article, then check what it kept or omitted.';
+      case _NanoLabSection.rewriting:
+        return 'See whether Gemini Nano can make a fictional message sound '
+            'more professional without changing its facts.';
+      case _NanoLabSection.proofreading:
+        return 'See whether Gemini Nano can correct deliberate spelling and '
+            'grammar mistakes while preserving the original meaning.';
+      case _NanoLabSection.imageDescription:
+        return 'Ask Gemini Nano to describe a fixed image, then compare the '
+            'description with what is actually visible.';
+      case _NanoLabSection.speechRecognition:
+        return 'Speak the fixed phrase and check whether the on-device '
+            'transcription preserves every important detail.';
+    }
+  }
+
+  String _everydayMeaning(_NanoLabSection section) {
+    switch (section) {
+      case _NanoLabSection.status:
+        return 'A supported phone may still need model or feature assets '
+            'downloaded before offline use. AVAILABLE means this particular '
+            'capability is ready now.';
+      case _NanoLabSection.prompt:
+        return 'A fluent answer can still miss instructions or introduce '
+            'unsupported details. Review the response rather than treating '
+            'it as automatically correct.';
+      case _NanoLabSection.summarization:
+        return 'On the Pixel 10 Pro, the dedicated summarizer was fast and '
+            'factually sound but repeatedly omitted the article\'s central '
+            'results.';
+      case _NanoLabSection.rewriting:
+        return 'On the Pixel 10 Pro, rewriting preserved the supplied facts '
+            'but repeatedly added an unrequested sign-off and name placeholder.';
+      case _NanoLabSection.proofreading:
+        return 'On the Pixel 10 Pro, proofreading corrected every planted '
+            'error, preserved all facts, added nothing, and averaged about '
+            'one second.';
+      case _NanoLabSection.imageDescription:
+        return 'Repeated wording does not guarantee complete recognition. In '
+            'the fixed tests, Nano omitted one prominent object and '
+            'misidentified another.';
+      case _NanoLabSection.speechRecognition:
+        return 'Speech recognition usually preserved the complete meaning, '
+            'but occasional meaningful substitutions make user review '
+            'important.';
+    }
+  }
+
+  IconData _everydayIcon(_NanoLabSection section) {
+    switch (section) {
+      case _NanoLabSection.status:
+        return Icons.offline_bolt_outlined;
+      case _NanoLabSection.prompt:
+        return Icons.chat_bubble_outline;
+      case _NanoLabSection.summarization:
+        return Icons.summarize;
+      case _NanoLabSection.rewriting:
+        return Icons.edit_note;
+      case _NanoLabSection.proofreading:
+        return Icons.spellcheck;
+      case _NanoLabSection.imageDescription:
+        return Icons.image_search;
+      case _NanoLabSection.speechRecognition:
+        return Icons.mic_none;
+    }
+  }
+
+  Color _everydayStatusColor(String status, ColorScheme colors) {
+    switch (status) {
+      case 'AVAILABLE':
+        return Colors.green;
+      case 'DOWNLOADABLE':
+        return Colors.orange;
+      case 'DOWNLOADING':
+      case 'CHECKING':
+        return colors.primary;
+      case 'UNAVAILABLE':
+      case 'ERROR':
+        return colors.error;
+      default:
+        return colors.outline;
+    }
+  }
+
+  Widget _buildEverydayReadinessCard({
+    required String status,
+    required String description,
+    required bool isChecking,
+    required VoidCallback onCheck,
+    required bool isStartingDownload,
+    required VoidCallback onDownload,
+    String? error,
+    String? downloadMessage,
+    int? downloadedBytes,
+    int? totalBytes,
+  }) {
+    final colors = Theme.of(context).colorScheme;
+    final statusColor = _everydayStatusColor(status, colors);
+    final progress = downloadedBytes != null &&
+            totalBytes != null &&
+            totalBytes > 0
+        ? (downloadedBytes / totalBytes).clamp(0.0, 1.0).toDouble()
+        : null;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Readiness',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: statusColor.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: statusColor),
+                  ),
+                  child: Text(
+                    status,
+                    style: TextStyle(
+                      color: statusColor,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(description, style: const TextStyle(height: 1.4)),
+            if (downloadMessage != null) ...[
+              const SizedBox(height: 14),
+              LinearProgressIndicator(value: progress),
+              const SizedBox(height: 8),
+              Text(downloadMessage),
+              if (downloadedBytes != null) ...[
+                const SizedBox(height: 4),
+                Text(
+                  totalBytes != null && totalBytes > 0
+                      ? '${_formatBytes(downloadedBytes)} of '
+                          '${_formatBytes(totalBytes)}'
+                      : _formatBytes(downloadedBytes),
+                ),
+              ],
+            ],
+            if (error != null) ...[
+              const SizedBox(height: 12),
+              Text(error, style: TextStyle(color: colors.error)),
+            ],
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: isChecking || isStartingDownload ? null : onCheck,
+              icon: isChecking
+                  ? const SizedBox.square(
+                      dimension: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.refresh),
+              label: Text(isChecking ? 'Checking…' : 'Check readiness'),
+            ),
+            if (status == 'DOWNLOADABLE') ...[
+              const SizedBox(height: 10),
+              FilledButton.tonalIcon(
+                onPressed: isStartingDownload ? null : onDownload,
+                icon: isStartingDownload
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.download),
+                label: Text(
+                  isStartingDownload
+                      ? 'Starting download…'
+                      : 'Download required assets',
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEverydayInputCard(String label, String input) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              label,
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+            ),
+            const SizedBox(height: 10),
+            SelectableText(input, style: const TextStyle(height: 1.45)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEverydayResultCard({
+    required String output,
+    int? elapsedMilliseconds,
+    String? status,
+  }) {
+    if (output.trim().isEmpty && elapsedMilliseconds == null) {
+      return const SizedBox.shrink();
+    }
+
+    return Card(
+      color: Theme.of(context).colorScheme.primaryContainer,
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Result',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                  ),
+                ),
+                if (elapsedMilliseconds != null)
+                  Text(_formatElapsedTime(elapsedMilliseconds)),
+              ],
+            ),
+            if (status != null) ...[
+              const SizedBox(height: 6),
+              Text(status),
+            ],
+            if (output.trim().isNotEmpty) ...[
+              const SizedBox(height: 12),
+              SelectableText(output, style: const TextStyle(height: 1.45)),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEverydayMeaningCard(_NanoLabSection section) {
+    final colors = Theme.of(context).colorScheme;
+
+    return Card(
+      color: colors.secondaryContainer,
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'What this means',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: colors.onSecondaryContainer,
+                    fontWeight: FontWeight.bold,
+                  ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _everydayMeaning(section),
+              style: TextStyle(
+                color: colors.onSecondaryContainer,
+                height: 1.45,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEverydayError(String? error) {
+    if (error == null) {
+      return const SizedBox.shrink();
+    }
+
+    final colors = Theme.of(context).colorScheme;
+    return Card(
+      color: colors.errorContainer,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Text(error, style: TextStyle(color: colors.onErrorContainer)),
+      ),
+    );
+  }
+
+  Widget _buildEverydayTestScreen(
+    BuildContext context,
+    _NanoLabSection section,
+  ) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+
+    return Scaffold(
+      appBar: AppBar(title: Text(_everydayTitle(section))),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+          children: [
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: colors.primaryContainer,
+                borderRadius: BorderRadius.circular(24),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    _everydayIcon(section),
+                    size: 34,
+                    color: colors.onPrimaryContainer,
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _everydayTitle(section),
+                          style: theme.textTheme.titleLarge?.copyWith(
+                            color: colors.onPrimaryContainer,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          _everydayIntroduction(section),
+                          style: TextStyle(
+                            color: colors.onPrimaryContainer,
+                            height: 1.45,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 18),
+            ..._buildEverydayTestContent(section),
+            const SizedBox(height: 12),
+            _buildEverydayMeaningCard(section),
+            const SizedBox(height: 12),
+            TextButton.icon(
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const _NanoStatusScreen(),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.science_outlined),
+              label: const Text('Open Technical Lab for full controls'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _buildEverydayTestContent(_NanoLabSection section) {
+    switch (section) {
+      case _NanoLabSection.status:
+        return [
+          _buildEverydayReadinessCard(
+            status: _status,
+            description: _description,
+            isChecking: _isChecking,
+            onCheck: _checkNanoStatus,
+            isStartingDownload: _isStartingDownload,
+            onDownload: _startDownload,
+            error: _errorDetails,
+            downloadMessage: _downloadMessage,
+            downloadedBytes: _downloadedBytes,
+            totalBytes: _totalBytes,
+          ),
+          if (_deviceInformation != null) ...[
+            const SizedBox(height: 12),
+            _buildEverydayInputCard('This device', _deviceInformation!),
+          ],
+        ];
+
+      case _NanoLabSection.prompt:
+        return [
+          _buildEverydayReadinessCard(
+            status: _status,
+            description: _description,
+            isChecking: _isChecking,
+            onCheck: _checkNanoStatus,
+            isStartingDownload: _isStartingDownload,
+            onDownload: _startDownload,
+            error: _errorDetails,
+            downloadMessage: _downloadMessage,
+            downloadedBytes: _downloadedBytes,
+            totalBytes: _totalBytes,
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _promptController,
+            enabled: !_isRunningPrompt,
+            minLines: 3,
+            maxLines: 7,
+            onChanged: (_) => setState(() {}),
+            decoration: const InputDecoration(
+              border: OutlineInputBorder(),
+              labelText: 'Your instruction',
+              helperText: 'Keep it short and avoid sensitive information.',
+            ),
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: _status == 'AVAILABLE' &&
+                    !_isRunningPrompt &&
+                    _promptController.text.trim().isNotEmpty
+                ? () => _runPrompt()
+                : null,
+            icon: _isRunningPrompt
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.play_arrow),
+            label: Text(_isRunningPrompt ? 'Generating…' : 'Run test'),
+          ),
+          const SizedBox(height: 12),
+          _buildEverydayError(_promptError),
+          _buildEverydayResultCard(
+            output: _promptOutput,
+            elapsedMilliseconds: _elapsedMilliseconds,
+            status: _promptStatus,
+          ),
+        ];
+
+      case _NanoLabSection.summarization:
+        return [
+          _buildEverydayReadinessCard(
+            status: _summarizationStatus,
+            description: _summarizationDescription,
+            isChecking: _isCheckingSummarization,
+            onCheck: _checkSummarizationStatus,
+            isStartingDownload: _isStartingSummarizationDownload,
+            onDownload: _startSummarizationDownload,
+            error: _summarizationError,
+            downloadMessage: _summarizationDownloadMessage,
+            downloadedBytes: _summarizationDownloadedBytes,
+            totalBytes: _summarizationTotalBytes,
+          ),
+          const SizedBox(height: 12),
+          _buildEverydayInputCard(
+            'Fixed fictional article',
+            _summarizationController.text,
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: _summarizationStatus == 'AVAILABLE' &&
+                    !_isRunningSummarization
+                ? _runSummarization
+                : null,
+            icon: _isRunningSummarization
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.play_arrow),
+            label: Text(
+              _isRunningSummarization ? 'Summarizing…' : 'Run summary test',
+            ),
+          ),
+          const SizedBox(height: 12),
+          _buildEverydayResultCard(
+            output: _summarizationOutput,
+            elapsedMilliseconds: _summarizationElapsedMilliseconds,
+          ),
+        ];
+
+      case _NanoLabSection.rewriting:
+        return [
+          _buildEverydayReadinessCard(
+            status: _rewritingStatus,
+            description: _rewritingDescription,
+            isChecking: _isCheckingRewriting,
+            onCheck: _checkRewritingStatus,
+            isStartingDownload: _isStartingRewritingDownload,
+            onDownload: _startRewritingDownload,
+            error: _rewritingError,
+            downloadMessage: _rewritingDownloadMessage,
+            downloadedBytes: _rewritingDownloadedBytes,
+            totalBytes: _rewritingTotalBytes,
+          ),
+          const SizedBox(height: 12),
+          _buildEverydayInputCard(
+            'Fixed fictional message',
+            _rewritingController.text,
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed:
+                _rewritingStatus == 'AVAILABLE' && !_isRunningRewriting
+                    ? _runRewriting
+                    : null,
+            icon: _isRunningRewriting
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.play_arrow),
+            label: Text(
+              _isRunningRewriting ? 'Rewriting…' : 'Run rewriting test',
+            ),
+          ),
+          const SizedBox(height: 12),
+          _buildEverydayResultCard(
+            output: _rewritingOutput,
+            elapsedMilliseconds: _rewritingElapsedMilliseconds,
+          ),
+        ];
+
+      case _NanoLabSection.proofreading:
+        return [
+          _buildEverydayReadinessCard(
+            status: _proofreadingStatus,
+            description: _proofreadingDescription,
+            isChecking: _isCheckingProofreading,
+            onCheck: _checkProofreadingStatus,
+            isStartingDownload: _isStartingProofreadingDownload,
+            onDownload: _startProofreadingDownload,
+            error: _proofreadingError,
+            downloadMessage: _proofreadingDownloadMessage,
+            downloadedBytes: _proofreadingDownloadedBytes,
+            totalBytes: _proofreadingTotalBytes,
+          ),
+          const SizedBox(height: 12),
+          _buildEverydayInputCard(
+            'Sentence with deliberate mistakes',
+            _proofreadingController.text,
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed:
+                _proofreadingStatus == 'AVAILABLE' && !_isRunningProofreading
+                    ? _runProofreading
+                    : null,
+            icon: _isRunningProofreading
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.play_arrow),
+            label: Text(
+              _isRunningProofreading
+                  ? 'Proofreading…'
+                  : 'Run proofreading test',
+            ),
+          ),
+          const SizedBox(height: 12),
+          _buildEverydayResultCard(
+            output: _proofreadingOutput,
+            elapsedMilliseconds: _proofreadingElapsedMilliseconds,
+          ),
+        ];
+
+      case _NanoLabSection.imageDescription:
+        final aspectRatio = _imageDescriptionTestImageWidth != null &&
+                _imageDescriptionTestImageHeight != null &&
+                _imageDescriptionTestImageHeight! > 0
+            ? _imageDescriptionTestImageWidth! /
+                _imageDescriptionTestImageHeight!
+            : 3 / 2;
+        return [
+          _buildEverydayReadinessCard(
+            status: _imageDescriptionStatus,
+            description: _imageDescriptionDescription,
+            isChecking: _isCheckingImageDescription,
+            onCheck: _checkImageDescriptionStatus,
+            isStartingDownload: _isStartingImageDescriptionDownload,
+            onDownload: _startImageDescriptionDownload,
+            error: _imageDescriptionError,
+            downloadMessage: _imageDescriptionDownloadMessage,
+            downloadedBytes: _imageDescriptionDownloadedBytes,
+            totalBytes: _imageDescriptionTotalBytes,
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            initialValue: _selectedImageDescriptionTestImageId,
+            decoration: const InputDecoration(
+              border: OutlineInputBorder(),
+              labelText: 'Fixed test image',
+            ),
+            items: const [
+              DropdownMenuItem(
+                value: _syntheticImageDescriptionTestImageId,
+                child: Text('Synthetic house scene'),
+              ),
+              DropdownMenuItem(
+                value: _realPhotoImageDescriptionTestImageId,
+                child: Text('Real tabletop photograph'),
+              ),
+            ],
+            onChanged: _isLoadingImageDescriptionTestImage ||
+                    _isRunningImageDescription
+                ? null
+                : (value) {
+                    if (value != null &&
+                        value != _selectedImageDescriptionTestImageId) {
+                      _selectImageDescriptionTestImage(value);
+                    }
+                  },
+          ),
+          const SizedBox(height: 12),
+          Card(
+            clipBehavior: Clip.antiAlias,
+            child: AspectRatio(
+              aspectRatio: aspectRatio,
+              child: _imageDescriptionTestImageBytes == null
+                  ? const Center(child: CircularProgressIndicator())
+                  : Image.memory(
+                      _imageDescriptionTestImageBytes!,
+                      fit: BoxFit.contain,
+                      gaplessPlayback: true,
+                    ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: _imageDescriptionStatus == 'AVAILABLE' &&
+                    !_isRunningImageDescription &&
+                    !_isLoadingImageDescriptionTestImage &&
+                    _imageDescriptionTestImageBytes != null
+                ? _runImageDescription
+                : null,
+            icon: _isRunningImageDescription
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.play_arrow),
+            label: Text(
+              _isRunningImageDescription
+                  ? 'Describing…'
+                  : 'Describe this image',
+            ),
+          ),
+          const SizedBox(height: 12),
+          _buildEverydayResultCard(
+            output: _imageDescriptionOutput,
+            elapsedMilliseconds: _imageDescriptionElapsedMilliseconds,
+          ),
+        ];
+
+      case _NanoLabSection.speechRecognition:
+        final transcript = _speechRecognitionFinalText.isNotEmpty
+            ? _speechRecognitionFinalText
+            : _speechRecognitionPartialText;
+        return [
+          _buildEverydayReadinessCard(
+            status: _speechRecognitionStatus,
+            description: _speechRecognitionDescription,
+            isChecking: _isCheckingSpeechRecognition,
+            onCheck: _checkSpeechRecognitionStatus,
+            isStartingDownload: _isStartingSpeechRecognitionDownload,
+            onDownload: _startSpeechRecognitionDownload,
+            error: _speechRecognitionError,
+            downloadMessage: _speechRecognitionDownloadMessage,
+            downloadedBytes: _speechRecognitionDownloadedBytes,
+            totalBytes: _speechRecognitionTotalBytes,
+          ),
+          const SizedBox(height: 12),
+          _buildEverydayInputCard(
+            'Fixed phrase to speak',
+            _speechRecognitionTestPhrase,
+          ),
+          const SizedBox(height: 12),
+          if (_isRunningSpeechRecognition)
+            FilledButton.icon(
+              onPressed:
+                  _isStoppingSpeechRecognition ? null : _stopSpeechRecognition,
+              icon: _isStoppingSpeechRecognition
+                  ? const SizedBox.square(
+                      dimension: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.stop),
+              label: Text(
+                _isStoppingSpeechRecognition ? 'Stopping…' : 'Stop listening',
+              ),
+            )
+          else
+            FilledButton.icon(
+              onPressed: _speechRecognitionStatus == 'AVAILABLE' &&
+                      !_isStartingSpeechRecognition
+                  ? _startSpeechRecognition
+                  : null,
+              icon: _isStartingSpeechRecognition
+                  ? const SizedBox.square(
+                      dimension: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.mic),
+              label: Text(
+                _isStartingSpeechRecognition
+                    ? 'Starting…'
+                    : 'Start listening',
+              ),
+            ),
+          const SizedBox(height: 12),
+          _buildEverydayResultCard(
+            output: transcript,
+            elapsedMilliseconds: _speechRecognitionElapsedMilliseconds,
+            status: _speechRecognitionSessionStatus,
+          ),
+        ];
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final everydaySection = widget.initialSection;
+    if (widget.everydayMode && everydaySection != null) {
+      return _buildEverydayTestScreen(context, everydaySection);
+    }
+
     final colors = Theme.of(context).colorScheme;
     final statusColor = _statusColor(colors);
     final summarizationStatusColor = _summarizationStatusColor(colors);
@@ -5546,4 +6325,3 @@ class _NanoStatusScreenState extends State<_NanoStatusScreen> {
     );
   }
 }
-

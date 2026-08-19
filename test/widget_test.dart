@@ -41,4 +41,20 @@ void main() {
     expect(find.text('Check speech recognition status'), findsOneWidget);
     expect(find.text('Fixed phrase to speak:'), findsOneWidget);
   });
+
+  testWidgets('Everyday Usefulness opens a simplified standalone test', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(const NanoLabApp());
+
+    await tester.tap(find.byKey(const Key('everyday_usefulness_card')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Fix my writing'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Fix My Writing'), findsWidgets);
+    expect(find.text('Readiness'), findsOneWidget);
+    expect(find.text('Technical Lab'), findsNothing);
+  });
 }
