@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../features/memory_experiment/memory_experiment_screen.dart';
 import 'device_report_card_screen.dart';
 import 'everyday_usefulness_screen.dart';
 import 'technical_lab_screen.dart';
@@ -112,6 +113,23 @@ class NanoLabHomeScreen extends StatelessWidget {
                   Navigator.of(context).push(
                     MaterialPageRoute<void>(
                       builder: (_) => const DeviceReportCardScreen(),
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: 14),
+              _NanoLabPathCard(
+                key: const Key('memory_experiment_card'),
+                icon: Icons.memory_outlined,
+                title: 'Memory Experiment',
+                description:
+                    'Capture controlled Android and Nano Lab memory snapshots, '
+                    'then pair them with read-only ADB measurements.',
+                accent: Colors.deepOrange,
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const MemoryExperimentScreen(),
                     ),
                   );
                 },

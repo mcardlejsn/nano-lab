@@ -66,6 +66,10 @@ class NanoNativeService {
     return _methodChannel.invokeMapMethod<String, dynamic>('getPromptStatus');
   }
 
+  Future<Map<String, dynamic>?> getMemorySnapshot() {
+    return _methodChannel.invokeMapMethod<String, dynamic>('getMemorySnapshot');
+  }
+
   Future<Map<String, dynamic>?> setModelReleaseStage(String releaseStage) {
     return _methodChannel.invokeMapMethod<String, dynamic>(
       'setModelReleaseStage',

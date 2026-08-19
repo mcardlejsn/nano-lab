@@ -13,6 +13,25 @@ void main() {
     expect(find.text('Everyday Usefulness'), findsOneWidget);
     expect(find.text('Technical Lab'), findsOneWidget);
     expect(find.text('Device Report Card'), findsOneWidget);
+    expect(find.text('Memory Experiment'), findsOneWidget);
+  });
+
+  testWidgets('Memory Experiment opens without taking a measurement', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(const NanoLabApp());
+
+    final memoryExperimentCard = find.byKey(
+      const Key('memory_experiment_card'),
+    );
+    await tester.ensureVisible(memoryExperimentCard);
+    await tester.pumpAndSettle();
+    await tester.tap(memoryExperimentCard);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Memory Experiment'), findsOneWidget);
+    expect(find.text('Test the claim—do not assume it'), findsOneWidget);
+    expect(find.text('Controlled sequence'), findsOneWidget);
   });
 
   testWidgets('Technical Lab preserves the existing test harness', (

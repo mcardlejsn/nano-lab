@@ -1,6 +1,10 @@
 package com.mycarejournals.nano_lab
 
 import android.Manifest
+import android.app.ActivityManager
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -9,6 +13,10 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.os.Build
+import android.os.BatteryManager
+import android.os.Debug
+import android.os.PowerManager
+import android.os.Process
 import android.os.SystemClock
 import com.google.mlkit.genai.common.DownloadCallback
 import com.google.mlkit.genai.common.DownloadStatus
@@ -85,6 +93,7 @@ class MainActivity : FlutterActivity() {
             "com.mycarejournals.nano_lab/speech_recognition_events"
 
         const val METHOD_GET_PROMPT_STATUS = "getPromptStatus"
+        const val METHOD_GET_MEMORY_SNAPSHOT = "getMemorySnapshot"
         const val METHOD_GET_SYSTEM_INSTRUCTION_STATUS =
             "getSystemInstructionStatus"
         const val METHOD_GET_TOKEN_INFO = "getTokenInfo"
@@ -198,6 +207,7 @@ class MainActivity : FlutterActivity() {
         ).setMethodCallHandler { call, result ->
             when (call.method) {
                 METHOD_GET_PROMPT_STATUS -> checkPromptStatus(result)
+                METHOD_GET_MEMORY_SNAPSHOT -> getMemorySnapshot(result)
                 METHOD_GET_SYSTEM_INSTRUCTION_STATUS ->
                     checkSystemInstructionStatus(result)
                 METHOD_GET_TOKEN_INFO ->
@@ -425,6 +435,135 @@ class MainActivity : FlutterActivity() {
                 }
             },
         )
+    }
+
+    private fun getMemorySnapshot(result: MethodChannel.Result) {
+        try {
+            val activityManager =
+                getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            val systemMemory = ActivityManager.MemoryInfo()
+            activityManager.getMemoryInfo(systemMemory)
+
+            val processMemory = Debug.MemoryInfo()
+            Debug.getMemoryInfo(processMemory)
+            val processState = ActivityManager.RunningAppProcessInfo()
+            ActivityManager.getMyMemoryState(processState)
+
+            val batteryIntent = registerReceiver(
+                null,
+                IntentFilter(Intent.ACTION_BATTERY_CHANGED),
+            )
+            val batteryLevel = batteryIntent?.getIntExtra(
+                BatteryManager.EXTRA_LEVEL,
+                -1,
+            ) ?: -1
+            val batteryScale = batteryIntent?.getIntExtra(
+                BatteryManager.EXTRA_SCALE,
+                -1,
+            ) ?: -1
+            val batteryTemperatureTenthsCelsius = batteryIntent?.getIntExtra(
+                BatteryManager.EXTRA_TEMPERATURE,
+                -1,
+            ) ?: -1
+            val batteryPercent = if (batteryLevel >= 0 && batteryScale > 0) {
+                batteryLevel.toDouble() * 100.0 / batteryScale.toDouble()
+            } else {
+                null
+            }
+            val batteryTemperatureCelsius =
+                if (batteryTemperatureTenthsCelsius >= 0) {
+                    batteryTemperatureTenthsCelsius / 10.0
+                } else {
+                    null
+                }
+
+            val powerManager =
+                getSystemService(Context.POWER_SERVICE) as PowerManager
+            val thermalStatus = if (Build.VERSION.SDK_INT >= 29) {
+                powerManager.currentThermalStatus
+            } else {
+                null
+            }
+            val freeMemoryBytes = if (Build.VERSION.SDK_INT >= 37) {
+                runCatching {
+                    systemMemory.javaClass
+                        .getField("freeMem")
+                        .getLong(systemMemory)
+                }.getOrNull()
+            } else {
+                null
+            }
+
+            val memoryStats = processMemory.memoryStats
+            result.success(
+                mapOf(
+                    "capturedAtEpochMilliseconds" to
+                        System.currentTimeMillis(),
+                    "elapsedRealtimeMilliseconds" to
+                        SystemClock.elapsedRealtime(),
+                    "pid" to Process.myPid(),
+                    "device" to mapOf(
+                        "manufacturer" to Build.MANUFACTURER,
+                        "model" to Build.MODEL,
+                        "device" to Build.DEVICE,
+                        "hardware" to Build.HARDWARE,
+                        "androidVersion" to Build.VERSION.RELEASE,
+                        "sdkLevel" to Build.VERSION.SDK_INT,
+                        "buildFingerprint" to Build.FINGERPRINT,
+                    ),
+                    "system" to mapOf(
+                        "advertisedMemoryBytes" to
+                            if (Build.VERSION.SDK_INT >= 34) {
+                                systemMemory.advertisedMem
+                            } else {
+                                null
+                            },
+                        "totalMemoryBytes" to systemMemory.totalMem,
+                        "availableMemoryBytes" to systemMemory.availMem,
+                        "freeMemoryBytes" to freeMemoryBytes,
+                        "lowMemoryThresholdBytes" to systemMemory.threshold,
+                        "lowMemory" to systemMemory.lowMemory,
+                    ),
+                    "process" to mapOf(
+                        "totalPssKib" to processMemory.totalPss,
+                        "totalRssKib" to
+                            if (Build.VERSION.SDK_INT >= 35) {
+                                Debug.getRss()
+                            } else {
+                                null
+                            },
+                        "totalPrivateDirtyKib" to
+                            processMemory.totalPrivateDirty,
+                        "totalPrivateCleanKib" to
+                            processMemory.totalPrivateClean,
+                        "totalSharedDirtyKib" to
+                            processMemory.totalSharedDirty,
+                        "totalSharedCleanKib" to
+                            processMemory.totalSharedClean,
+                        "totalSwappablePssKib" to
+                            processMemory.totalSwappablePss,
+                        "nativeHeapAllocatedBytes" to
+                            Debug.getNativeHeapAllocatedSize(),
+                        "nativeHeapSizeBytes" to Debug.getNativeHeapSize(),
+                        "importance" to processState.importance,
+                        "lastTrimLevel" to processState.lastTrimLevel,
+                        "memoryStatsKib" to memoryStats,
+                    ),
+                    "environment" to mapOf(
+                        "batteryPercent" to batteryPercent,
+                        "batteryTemperatureCelsius" to
+                            batteryTemperatureCelsius,
+                        "thermalStatus" to thermalStatus,
+                    ),
+                ),
+            )
+        } catch (error: Exception) {
+            result.error(
+                "MEMORY_SNAPSHOT_FAILED",
+                error.message ?: "Memory snapshot capture failed.",
+                null,
+            )
+        }
     }
 
     private fun configureGenerativeModel(
