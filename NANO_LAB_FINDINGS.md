@@ -26,6 +26,8 @@ Gemini Nano appears well suited to private, local, reversible assistance where a
 
 After all required model assets were downloaded, every tested capability continued working after an offline restart with airplane mode enabled and Wi-Fi disabled. A fresh release APK also contained neither the Android `INTERNET` nor `ACCESS_NETWORK_STATE` permission.
 
+An exploratory release-build memory experiment also found no visible AICore process footprint approaching 3 GB. AICore's visible processes occupied approximately 209 MiB PSS before Nano Lab opened and approximately 299 MiB after the first fixed prompt. This measurement does not rule out GPU, accelerator, kernel, firmware, or other allocations that Android does not attribute to ordinary process PSS.
+
 ## Status of this report
 
 This report completes the Pixel 10 Pro portion of Nano Lab. A controlled Pixel 11 Pro XL comparison will be added after that device becomes available. The present findings are complete for the tested device but should not be interpreted as a cross-device benchmark.
@@ -469,6 +471,31 @@ on Monday, August 17th, 2026. The fictional North Bridge office received 17 pack
 
 Basic mode was intentionally not tested because it uses a traditional on-device recognizer rather than the Gemini Nano model and would not materially answer Nano Lab's central question.
 
+### 8. Exploratory AICore memory experiment
+
+An exploratory memory experiment examined the claim that Gemini Nano or AICore reserves or consumes approximately 3 GB of RAM. The test used a release build on the stock Pixel 10 Pro after a fresh restart. ADB measurements were read-only; AICore was not disabled, cleared, killed, or force-stopped.
+
+The phone advertised 16.00 GiB of RAM, while Android reported approximately 15.21 GiB as kernel-accessible memory. The difference was approximately 809 MiB, not 3 GB.
+
+The same-boot sequence measured AICore before Nano Lab opened, after the app opened and constructed its six ML Kit clients, after the Stable Prompt API returned `AVAILABLE`, and after the first fixed prompt.
+
+| Stage | AICore PSS | AICore RSS | Nano Lab PSS | Change in AICore PSS |
+| --- | ---: | ---: | ---: | ---: |
+| Before Nano Lab opened | 208.7 MiB | 435.8 MiB | — | Baseline |
+| App opened; ML Kit clients constructed; no status check | 201.5 MiB | 431.9 MiB | 192.2 MiB | −7.2 MiB |
+| After Stable availability check | 201.7 MiB | 432.4 MiB | 241.6 MiB | +0.2 MiB |
+| After first fixed prompt | 298.9 MiB | 531.9 MiB | 253.1 MiB | +97.2 MiB |
+
+The Stable availability check did not visibly load a large model or materially increase AICore's process footprint. The first prompt completed in 5.53 seconds and increased visible AICore PSS by approximately 97 MiB compared with the preceding stage. AICore swap remained zero, the thermal status remained `None`, and the phone did not enter a low-memory state.
+
+Opening Nano Lab increased system used PSS primarily because Nano Lab's own foreground process occupied approximately 192 MiB. Android also moved substantial memory between cached and completely free categories during the sequence. Therefore, a reduction in a single free-memory value cannot automatically be interpreted as a permanent AICore reservation.
+
+**Memory finding:**
+
+> In one release-build test on a stock Pixel 10 Pro running Android 17, AICore's visible processes occupied approximately 209 MiB PSS before Nano Lab opened. Constructing ML Kit clients and checking Stable availability did not materially increase that footprint. Running the first Gemini Nano prompt increased visible AICore PSS to approximately 299 MiB—an increase of about 97 MiB. No measured state showed an AICore process footprint approaching 3 GB.
+
+This was one exploratory run rather than a comprehensive memory benchmark. Ordinary process PSS cannot reveal every possible GPU, accelerator, kernel, firmware, boot-reserved, or otherwise hidden allocation. The result therefore provides no evidence of an approximately 3 GB visible AICore process footprint during this test, but it does not definitively disprove every form of memory reservation or attribution outside normal process accounting.
+
 ## Offline-operation verification
 
 After all required assets were available, the following procedure was performed on the Pixel 10 Pro:
@@ -611,6 +638,7 @@ For structured tasks, ordinary deterministic code should be used whenever the ta
 - No attempt was made to test every generation-setting combination.
 - The Top-K comparison used only one run at each value, so it cannot establish per-setting repeatability or a statistical relationship between Top-K and output variation.
 - The Gemini 3.7 Flash comparison used one externally submitted photograph and was qualitative rather than a controlled latency benchmark.
+- The memory experiment used one exploratory run, included small manual timing gaps, and cannot observe allocations outside normal Android process accounting.
 - No production medical or caregiver data was used.
 
 ## Planned Pixel 11 Pro XL addendum
@@ -623,6 +651,7 @@ When the Pixel 11 Pro XL becomes available, Nano Lab will repeat a small set of 
 - Processing time
 - Speech Recognition behavior
 - Offline operation
+- AICore PSS and RSS before Nano Lab opens, after client construction, after the Stable availability check, and after the first identical prompt
 
 The comparison will use the same inputs and settings rather than introducing new test content. This report will then be updated with a concise cross-device table and conclusions.
 
@@ -652,5 +681,3 @@ The Pixel 10 Pro results support this overall conclusion:
 - [GenAI Image Description API](https://developers.google.com/ml-kit/genai/image-description/android)
 - [GenAI Speech Recognition API](https://developers.google.com/ml-kit/genai/speech-recognition/android)
 - [Android AAPT2 documentation](https://developer.android.com/tools/aapt2)
-
-

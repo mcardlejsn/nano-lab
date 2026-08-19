@@ -10,7 +10,7 @@ class MemoryExperimentController extends ChangeNotifier {
   MemoryExperimentController({required this._nativeService});
 
   static const stages = <String>[
-    'App opened before Nano status check',
+    'App opened; ML Kit clients constructed; no status check',
     'After Nano/AICore availability check',
     'After first identical prompt',
     'After five identical prompts',

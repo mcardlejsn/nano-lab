@@ -20,6 +20,7 @@ The Pixel 10 Pro evaluation is complete. It covers:
 - Model and feature-adapter availability and downloads
 - Airplane-mode operation after all assets are installed
 - Release APK permission verification
+- Exploratory AICore and system-memory measurements
 
 A controlled Pixel 11 Pro XL comparison will be added after that device becomes available.
 
@@ -55,6 +56,7 @@ Only fictional or disposable test content is used.
 - Advanced Speech Recognition was impressively capable but made occasional meaningful substitutions.
 - All six tested capabilities continued working after Nano Lab was restarted in airplane mode with Wi-Fi disabled.
 - The release APK contained neither `INTERNET` nor `ACCESS_NETWORK_STATE`.
+- AICore's visible processes used approximately 209 MiB PSS before Nano Lab opened and approximately 299 MiB after the first fixed prompt; no measured state approached 3 GB of visible AICore process memory.
 
 The most important general lesson was:
 
@@ -165,4 +167,3 @@ Nano Lab is licensed under the [Apache License 2.0](LICENSE).
 ## Disclaimer
 
 Nano Lab is an independent project and is not affiliated with, sponsored by, or endorsed by Google. Google, Android, Gemini, Gemini Nano, ML Kit, AICore, and Pixel are trademarks of their respective owners.
-
