@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../features/proofreading/proofreading_controller.dart';
 import '../services/nano_native_service.dart';
 import 'nano_lab_section.dart';
 
@@ -121,10 +122,6 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
       'PM, and the town council votes on permanent funding October 12, 2026. '
       'please send me the inventory list by Friday so I can check it.';
 
-  static const _defaultProofreadingText =
-      'the fictional Northbridge office recieve 17 packages on Monday, but '
-      'three was labeld incorrect and needs to be checked by Friday.';
-
   static const _speechRecognitionTestPhrase =
       'On Monday, August seventeenth, twenty twenty-six, the fictional '
       'Northbridge office received seventeen packages. Three were labeled '
@@ -138,13 +135,12 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
   late final TextEditingController _candidateCountController;
   late final TextEditingController _summarizationController;
   late final TextEditingController _rewritingController;
-  late final TextEditingController _proofreadingController;
+  late final ProofreadingController _proofreadingFeature;
 
   late final StreamSubscription<dynamic> _downloadSubscription;
   late final StreamSubscription<dynamic> _promptSubscription;
   late final StreamSubscription<dynamic> _summarizationDownloadSubscription;
   late final StreamSubscription<dynamic> _rewritingDownloadSubscription;
-  late final StreamSubscription<dynamic> _proofreadingDownloadSubscription;
   late final StreamSubscription<dynamic> _imageDescriptionDownloadSubscription;
   late final StreamSubscription<dynamic> _speechRecognitionDownloadSubscription;
   late final StreamSubscription<dynamic> _speechRecognitionSubscription;
@@ -160,9 +156,6 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
   bool _isCheckingRewriting = false;
   bool _isStartingRewritingDownload = false;
   bool _isRunningRewriting = false;
-  bool _isCheckingProofreading = false;
-  bool _isStartingProofreadingDownload = false;
-  bool _isRunningProofreading = false;
   bool _isCheckingImageDescription = false;
   bool _isStartingImageDescriptionDownload = false;
   bool _isRunningImageDescription = false;
@@ -233,18 +226,6 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
   int? _rewritingElapsedMilliseconds;
   int? _rewritingSuggestionCount;
 
-  String _proofreadingStatus = 'NOT CHECKED';
-  String _proofreadingDescription =
-      'Check whether the dedicated ML Kit Proofreading API is available.';
-  String? _proofreadingError;
-  String? _proofreadingDownloadMessage;
-  String? _submittedProofreadingInput;
-  String _proofreadingOutput = '';
-  int? _proofreadingDownloadedBytes;
-  int? _proofreadingTotalBytes;
-  int? _proofreadingElapsedMilliseconds;
-  int? _proofreadingSuggestionCount;
-
   String _imageDescriptionStatus = 'NOT CHECKED';
   String _imageDescriptionDescription =
       'Check whether the dedicated ML Kit Image Description API is available.';
@@ -291,9 +272,8 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
       text: _defaultSummarizationText,
     );
     _rewritingController = TextEditingController(text: _defaultRewritingText);
-    _proofreadingController = TextEditingController(
-      text: _defaultProofreadingText,
-    );
+    _proofreadingFeature = ProofreadingController(nativeService: _nativeService)
+      ..addListener(_handleProofreadingFeatureChanged);
 
     _downloadSubscription = _nativeService.promptDownloadEvents.listen(
       _handleDownloadEvent,
@@ -316,13 +296,6 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
         .listen(
           _handleRewritingDownloadEvent,
           onError: _handleRewritingDownloadStreamError,
-        );
-
-    _proofreadingDownloadSubscription = _nativeService
-        .proofreadingDownloadEvents
-        .listen(
-          _handleProofreadingDownloadEvent,
-          onError: _handleProofreadingDownloadStreamError,
         );
 
     _imageDescriptionDownloadSubscription = _nativeService
@@ -368,7 +341,6 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
     _promptSubscription.cancel();
     _summarizationDownloadSubscription.cancel();
     _rewritingDownloadSubscription.cancel();
-    _proofreadingDownloadSubscription.cancel();
     _imageDescriptionDownloadSubscription.cancel();
     _speechRecognitionDownloadSubscription.cancel();
     _speechRecognitionSubscription.cancel();
@@ -380,8 +352,16 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
     _candidateCountController.dispose();
     _summarizationController.dispose();
     _rewritingController.dispose();
-    _proofreadingController.dispose();
+    _proofreadingFeature
+      ..removeListener(_handleProofreadingFeatureChanged)
+      ..dispose();
     super.dispose();
+  }
+
+  void _handleProofreadingFeatureChanged() {
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   Future<void> _checkNanoStatus() async {
@@ -977,204 +957,6 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
       if (mounted) {
         setState(() {
           _isRunningRewriting = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _checkProofreadingStatus() async {
-    setState(() {
-      _isCheckingProofreading = true;
-      _proofreadingStatus = 'CHECKING';
-      _proofreadingDescription =
-          'Checking the dedicated Proofreading API configuration…';
-      _proofreadingError = null;
-    });
-
-    try {
-      final result = await _nativeService.getProofreadingStatus();
-
-      if (!mounted) {
-        return;
-      }
-
-      if (result == null) {
-        setState(() {
-          _proofreadingStatus = 'ERROR';
-          _proofreadingDescription =
-              'Kotlin returned no proofreading status information.';
-        });
-        return;
-      }
-
-      setState(() {
-        _proofreadingStatus = result['status']?.toString() ?? 'UNKNOWN';
-        _proofreadingDescription =
-            result['description']?.toString() ??
-            'No proofreading status description was returned.';
-      });
-    } on PlatformException catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _proofreadingStatus = 'ERROR';
-        _proofreadingDescription =
-            error.message ?? 'Proofreading status detection failed.';
-        _proofreadingError = 'Platform error: ${error.code}';
-      });
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _proofreadingStatus = 'ERROR';
-        _proofreadingDescription =
-            'Unexpected proofreading status-check failure.';
-        _proofreadingError = error.toString();
-      });
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isCheckingProofreading = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _startProofreadingDownload() async {
-    setState(() {
-      _isStartingProofreadingDownload = true;
-      _proofreadingDownloadMessage =
-          'Requesting the proofreading asset download…';
-      _proofreadingDownloadedBytes = null;
-      _proofreadingTotalBytes = null;
-      _proofreadingError = null;
-    });
-
-    try {
-      await _nativeService.startProofreadingDownload();
-
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _proofreadingStatus = 'DOWNLOADING';
-        _proofreadingDescription =
-            'The required proofreading assets are downloading.';
-      });
-    } on PlatformException catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _proofreadingDownloadMessage = null;
-        _proofreadingError =
-            '${error.message ?? 'The proofreading download could not be started.'}\n'
-            'Platform error: ${error.code}';
-      });
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _proofreadingDownloadMessage = null;
-        _proofreadingError = 'Unexpected proofreading download error: $error';
-      });
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isStartingProofreadingDownload = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _runProofreading() async {
-    final input = _proofreadingController.text;
-    final stopwatch = Stopwatch()..start();
-
-    setState(() {
-      _isRunningProofreading = true;
-      _submittedProofreadingInput = input;
-      _proofreadingOutput = '';
-      _proofreadingElapsedMilliseconds = null;
-      _proofreadingSuggestionCount = null;
-      _proofreadingError = null;
-    });
-
-    try {
-      final result = await _nativeService.runProofreading(input);
-      stopwatch.stop();
-
-      if (!mounted) {
-        return;
-      }
-
-      if (result == null) {
-        setState(() {
-          _proofreadingElapsedMilliseconds = stopwatch.elapsedMilliseconds;
-          _proofreadingError = 'Kotlin returned no proofreading result.';
-        });
-        return;
-      }
-
-      final nativeInput = result['input']?.toString();
-      if (nativeInput != input) {
-        setState(() {
-          _proofreadingElapsedMilliseconds = stopwatch.elapsedMilliseconds;
-          _proofreadingError =
-              'The native proofreading input did not match the displayed input.';
-        });
-        return;
-      }
-
-      setState(() {
-        _proofreadingOutput = result['output']?.toString() ?? '';
-        _proofreadingSuggestionCount = _readInteger(result['suggestionCount']);
-        _proofreadingElapsedMilliseconds =
-            _readInteger(result['elapsedMilliseconds']) ??
-            stopwatch.elapsedMilliseconds;
-      });
-    } on PlatformException catch (error) {
-      stopwatch.stop();
-
-      if (!mounted) {
-        return;
-      }
-
-      final details = error.details;
-      final nativeElapsedMilliseconds = details is Map
-          ? _readInteger(details['elapsedMilliseconds'])
-          : null;
-
-      setState(() {
-        _proofreadingElapsedMilliseconds =
-            nativeElapsedMilliseconds ?? stopwatch.elapsedMilliseconds;
-        _proofreadingError =
-            '${error.message ?? 'Gemini Nano proofreading failed.'}\n'
-            'Platform error: ${error.code}';
-      });
-    } catch (error) {
-      stopwatch.stop();
-
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _proofreadingElapsedMilliseconds = stopwatch.elapsedMilliseconds;
-        _proofreadingError = 'Unexpected proofreading error: $error';
-      });
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isRunningProofreading = false;
         });
       }
     }
@@ -2174,58 +1956,6 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
     });
   }
 
-  void _handleProofreadingDownloadEvent(dynamic event) {
-    if (!mounted || event is! Map) {
-      return;
-    }
-
-    final eventName = event['event']?.toString();
-
-    setState(() {
-      switch (eventName) {
-        case 'started':
-          _proofreadingStatus = 'DOWNLOADING';
-          _proofreadingDescription =
-              'The required proofreading assets are downloading.';
-          _proofreadingTotalBytes = _readInteger(event['totalBytes']);
-          _proofreadingDownloadedBytes = 0;
-          _proofreadingDownloadMessage = 'Proofreading download started.';
-          break;
-
-        case 'progress':
-          _proofreadingStatus = 'DOWNLOADING';
-          _proofreadingDownloadedBytes = _readInteger(event['downloadedBytes']);
-          _proofreadingTotalBytes =
-              _readInteger(event['totalBytes']) ?? _proofreadingTotalBytes;
-          _proofreadingDownloadMessage = 'Downloading proofreading assets…';
-          break;
-
-        case 'completed':
-          _proofreadingStatus = 'AVAILABLE';
-          _proofreadingDescription =
-              'The dedicated Proofreading API is ready to use.';
-          _proofreadingDownloadedBytes =
-              _readInteger(event['downloadedBytes']) ?? _proofreadingTotalBytes;
-          _proofreadingTotalBytes =
-              _readInteger(event['totalBytes']) ?? _proofreadingTotalBytes;
-          _proofreadingDownloadMessage =
-              'Proofreading download completed successfully.';
-          _proofreadingError = null;
-          break;
-
-        case 'failed':
-          _proofreadingStatus = 'DOWNLOADABLE';
-          _proofreadingDescription =
-              'This device supports proofreading, but its assets are not ready.';
-          _proofreadingDownloadMessage = null;
-          _proofreadingError =
-              '${event['message'] ?? 'Proofreading asset download failed.'}\n'
-              'GenAI error code: ${event['errorCode'] ?? 'unknown'}';
-          break;
-      }
-    });
-  }
-
   void _handleImageDescriptionDownloadEvent(dynamic event) {
     if (!mounted || event is! Map) {
       return;
@@ -2593,18 +2323,6 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
     });
   }
 
-  void _handleProofreadingDownloadStreamError(Object error) {
-    if (!mounted) {
-      return;
-    }
-
-    setState(() {
-      _proofreadingDownloadMessage = null;
-      _proofreadingError =
-          'Proofreading download progress stream error: $error';
-    });
-  }
-
   void _handleImageDescriptionDownloadStreamError(Object error) {
     if (!mounted) {
       return;
@@ -2705,7 +2423,7 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
   }
 
   Color _proofreadingStatusColor(ColorScheme colors) {
-    switch (_proofreadingStatus) {
+    switch (_proofreadingFeature.status) {
       case 'AVAILABLE':
         return Colors.green;
       case 'DOWNLOADABLE':
@@ -3456,44 +3174,45 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
       case NanoLabSection.proofreading:
         return [
           _buildEverydayReadinessCard(
-            status: _proofreadingStatus,
-            description: _proofreadingDescription,
-            isChecking: _isCheckingProofreading,
-            onCheck: _checkProofreadingStatus,
-            isStartingDownload: _isStartingProofreadingDownload,
-            onDownload: _startProofreadingDownload,
-            error: _proofreadingError,
-            downloadMessage: _proofreadingDownloadMessage,
-            downloadedBytes: _proofreadingDownloadedBytes,
-            totalBytes: _proofreadingTotalBytes,
+            status: _proofreadingFeature.status,
+            description: _proofreadingFeature.description,
+            isChecking: _proofreadingFeature.isChecking,
+            onCheck: _proofreadingFeature.checkStatus,
+            isStartingDownload: _proofreadingFeature.isStartingDownload,
+            onDownload: _proofreadingFeature.startDownload,
+            error: _proofreadingFeature.error,
+            downloadMessage: _proofreadingFeature.downloadMessage,
+            downloadedBytes: _proofreadingFeature.downloadedBytes,
+            totalBytes: _proofreadingFeature.totalBytes,
           ),
           const SizedBox(height: 12),
           _buildEverydayInputCard(
             'Sentence with deliberate mistakes',
-            _proofreadingController.text,
+            _proofreadingFeature.inputController.text,
           ),
           const SizedBox(height: 12),
           FilledButton.icon(
             onPressed:
-                _proofreadingStatus == 'AVAILABLE' && !_isRunningProofreading
-                ? _runProofreading
+                _proofreadingFeature.status == 'AVAILABLE' &&
+                    !_proofreadingFeature.isRunning
+                ? _proofreadingFeature.run
                 : null,
-            icon: _isRunningProofreading
+            icon: _proofreadingFeature.isRunning
                 ? const SizedBox.square(
                     dimension: 18,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const Icon(Icons.play_arrow),
             label: Text(
-              _isRunningProofreading
+              _proofreadingFeature.isRunning
                   ? 'Proofreading…'
                   : 'Run proofreading test',
             ),
           ),
           const SizedBox(height: 12),
           _buildEverydayResultCard(
-            output: _proofreadingOutput,
-            elapsedMilliseconds: _proofreadingElapsedMilliseconds,
+            output: _proofreadingFeature.output,
+            elapsedMilliseconds: _proofreadingFeature.elapsedMilliseconds,
           ),
         ];
 
@@ -3682,7 +3401,7 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
     final hasValidSummarizationInput =
         _summarizationController.text.length > 400;
     final hasValidRewritingInput = _rewritingController.text.trim().isNotEmpty;
-    final hasValidProofreadingInput = _proofreadingController.text
+    final hasValidProofreadingInput = _proofreadingFeature.inputController.text
         .trim()
         .isNotEmpty;
     final imageDescriptionAspectRatio =
@@ -3698,8 +3417,8 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
         _isRunningSummarization ||
         _isStartingRewritingDownload ||
         _isRunningRewriting ||
-        _isStartingProofreadingDownload ||
-        _isRunningProofreading ||
+        _proofreadingFeature.isStartingDownload ||
+        _proofreadingFeature.isRunning ||
         _isStartingImageDescriptionDownload ||
         _isRunningImageDescription;
 
@@ -3731,11 +3450,12 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
           .toDouble();
     }
 
-    if (_proofreadingDownloadedBytes != null &&
-        _proofreadingTotalBytes != null &&
-        _proofreadingTotalBytes! > 0) {
+    if (_proofreadingFeature.downloadedBytes != null &&
+        _proofreadingFeature.totalBytes != null &&
+        _proofreadingFeature.totalBytes! > 0) {
       proofreadingProgress =
-          (_proofreadingDownloadedBytes! / _proofreadingTotalBytes!)
+          (_proofreadingFeature.downloadedBytes! /
+                  _proofreadingFeature.totalBytes!)
               .clamp(0.0, 1.0)
               .toDouble();
     }
@@ -3887,8 +3607,8 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
                         _isStartingSummarizationDownload ||
                         _isRunningRewriting ||
                         _isStartingRewritingDownload ||
-                        _isRunningProofreading ||
-                        _isStartingProofreadingDownload ||
+                        _proofreadingFeature.isRunning ||
+                        _proofreadingFeature.isStartingDownload ||
                         _isRunningImageDescription ||
                         _isStartingImageDescriptionDownload
                     ? null
@@ -3996,8 +3716,8 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
                         _isStartingSummarizationDownload ||
                         _isRunningRewriting ||
                         _isStartingRewritingDownload ||
-                        _isRunningProofreading ||
-                        _isStartingProofreadingDownload ||
+                        _proofreadingFeature.isRunning ||
+                        _proofreadingFeature.isStartingDownload ||
                         _isRunningImageDescription ||
                         _isStartingImageDescriptionDownload
                     ? null
@@ -4021,8 +3741,8 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
                           _isRunningSummarization ||
                           _isStartingRewritingDownload ||
                           _isRunningRewriting ||
-                          _isStartingProofreadingDownload ||
-                          _isRunningProofreading ||
+                          _proofreadingFeature.isStartingDownload ||
+                          _proofreadingFeature.isRunning ||
                           _isStartingImageDescriptionDownload ||
                           _isRunningImageDescription
                       ? null
@@ -4171,8 +3891,8 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
                         !_isRunningSummarization &&
                         !_isRunningRewriting &&
                         !_isStartingRewritingDownload &&
-                        !_isRunningProofreading &&
-                        !_isStartingProofreadingDownload &&
+                        !_proofreadingFeature.isRunning &&
+                        !_proofreadingFeature.isStartingDownload &&
                         !_isRunningImageDescription &&
                         !_isStartingImageDescriptionDownload &&
                         hasValidMaxOutputTokens &&
@@ -4215,7 +3935,7 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
                                 !_isRunningPrompt &&
                                 !_isRunningSummarization &&
                                 !_isRunningRewriting &&
-                                !_isRunningProofreading &&
+                                !_proofreadingFeature.isRunning &&
                                 !_isRunningImageDescription &&
                                 hasValidMaxOutputTokens &&
                                 _promptController.text.trim().isNotEmpty
@@ -4245,7 +3965,7 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
                     !_isRunningPrompt &&
                         !_isRunningSummarization &&
                         !_isRunningRewriting &&
-                        !_isRunningProofreading &&
+                        !_proofreadingFeature.isRunning &&
                         !_isRunningImageDescription &&
                         _completedRuns.isNotEmpty
                     ? () => _runPrompt(repeatRun: _completedRuns.last)
@@ -4471,8 +4191,8 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
                         _isStartingDownload ||
                         _isRunningRewriting ||
                         _isStartingRewritingDownload ||
-                        _isRunningProofreading ||
-                        _isStartingProofreadingDownload ||
+                        _proofreadingFeature.isRunning ||
+                        _proofreadingFeature.isStartingDownload ||
                         _isRunningImageDescription ||
                         _isStartingImageDescriptionDownload
                     ? null
@@ -4499,8 +4219,8 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
                           _isRunningSummarization ||
                           _isStartingRewritingDownload ||
                           _isRunningRewriting ||
-                          _isStartingProofreadingDownload ||
-                          _isRunningProofreading ||
+                          _proofreadingFeature.isStartingDownload ||
+                          _proofreadingFeature.isRunning ||
                           _isStartingImageDescriptionDownload ||
                           _isRunningImageDescription
                       ? null
@@ -4571,7 +4291,7 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
                         !_isRunningSummarization &&
                         !_isRunningPrompt &&
                         !_isRunningRewriting &&
-                        !_isRunningProofreading &&
+                        !_proofreadingFeature.isRunning &&
                         !_isRunningImageDescription &&
                         hasValidSummarizationInput
                     ? _runSummarization
@@ -4702,8 +4422,8 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
                         _isRunningSummarization ||
                         _isStartingDownload ||
                         _isStartingSummarizationDownload ||
-                        _isRunningProofreading ||
-                        _isStartingProofreadingDownload ||
+                        _proofreadingFeature.isRunning ||
+                        _proofreadingFeature.isStartingDownload ||
                         _isRunningImageDescription ||
                         _isStartingImageDescriptionDownload
                     ? null
@@ -4728,8 +4448,8 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
                           _isRunningPrompt ||
                           _isRunningSummarization ||
                           _isRunningRewriting ||
-                          _isStartingProofreadingDownload ||
-                          _isRunningProofreading ||
+                          _proofreadingFeature.isStartingDownload ||
+                          _proofreadingFeature.isRunning ||
                           _isStartingImageDescriptionDownload ||
                           _isRunningImageDescription
                       ? null
@@ -4795,7 +4515,7 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
                         !_isRunningRewriting &&
                         !_isRunningPrompt &&
                         !_isRunningSummarization &&
-                        !_isRunningProofreading &&
+                        !_proofreadingFeature.isRunning &&
                         !_isRunningImageDescription &&
                         hasValidRewritingInput
                     ? _runRewriting
@@ -4904,7 +4624,7 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
                             vertical: 8,
                           ),
                           child: Text(
-                            _proofreadingStatus,
+                            _proofreadingFeature.status,
                             style: TextStyle(
                               color: proofreadingStatusColor,
                               fontWeight: FontWeight.bold,
@@ -4913,11 +4633,11 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
                         ),
                       ),
                       const SizedBox(height: 16),
-                      SelectableText(_proofreadingDescription),
-                      if (_proofreadingError != null) ...[
+                      SelectableText(_proofreadingFeature.description),
+                      if (_proofreadingFeature.error != null) ...[
                         const SizedBox(height: 16),
                         SelectableText(
-                          _proofreadingError!,
+                          _proofreadingFeature.error!,
                           style: TextStyle(color: colors.error),
                         ),
                       ],
@@ -4928,9 +4648,9 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
               const SizedBox(height: 16),
               FilledButton.icon(
                 onPressed:
-                    _isCheckingProofreading ||
-                        _isStartingProofreadingDownload ||
-                        _isRunningProofreading ||
+                    _proofreadingFeature.isChecking ||
+                        _proofreadingFeature.isStartingDownload ||
+                        _proofreadingFeature.isRunning ||
                         _isRunningPrompt ||
                         _isRunningSummarization ||
                         _isRunningRewriting ||
@@ -4940,49 +4660,49 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
                         _isRunningImageDescription ||
                         _isStartingImageDescriptionDownload
                     ? null
-                    : _checkProofreadingStatus,
-                icon: _isCheckingProofreading
+                    : _proofreadingFeature.checkStatus,
+                icon: _proofreadingFeature.isChecking
                     ? const SizedBox.square(
                         dimension: 20,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.spellcheck),
                 label: Text(
-                  _isCheckingProofreading
+                  _proofreadingFeature.isChecking
                       ? 'Checking…'
                       : 'Check proofreading status',
                 ),
               ),
-              if (_proofreadingStatus == 'DOWNLOADABLE') ...[
+              if (_proofreadingFeature.status == 'DOWNLOADABLE') ...[
                 const SizedBox(height: 12),
                 FilledButton.tonalIcon(
                   onPressed:
-                      _isStartingProofreadingDownload ||
+                      _proofreadingFeature.isStartingDownload ||
                           _isStartingDownload ||
                           _isStartingSummarizationDownload ||
                           _isStartingRewritingDownload ||
                           _isRunningPrompt ||
                           _isRunningSummarization ||
                           _isRunningRewriting ||
-                          _isRunningProofreading ||
+                          _proofreadingFeature.isRunning ||
                           _isStartingImageDescriptionDownload ||
                           _isRunningImageDescription
                       ? null
-                      : _startProofreadingDownload,
-                  icon: _isStartingProofreadingDownload
+                      : _proofreadingFeature.startDownload,
+                  icon: _proofreadingFeature.isStartingDownload
                       ? const SizedBox.square(
                           dimension: 20,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Icon(Icons.download),
                   label: Text(
-                    _isStartingProofreadingDownload
+                    _proofreadingFeature.isStartingDownload
                         ? 'Starting download…'
                         : 'Download proofreading assets',
                   ),
                 ),
               ],
-              if (_proofreadingDownloadMessage != null) ...[
+              if (_proofreadingFeature.downloadMessage != null) ...[
                 const SizedBox(height: 16),
                 Card(
                   child: Padding(
@@ -4992,15 +4712,17 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
                       children: [
                         LinearProgressIndicator(value: proofreadingProgress),
                         const SizedBox(height: 12),
-                        Text(_proofreadingDownloadMessage!),
-                        if (_proofreadingDownloadedBytes != null) ...[
+                        Text(_proofreadingFeature.downloadMessage!),
+                        if (_proofreadingFeature.downloadedBytes != null) ...[
                           const SizedBox(height: 8),
                           Text(
-                            _proofreadingTotalBytes != null &&
-                                    _proofreadingTotalBytes! > 0
-                                ? '${_formatBytes(_proofreadingDownloadedBytes!)} of '
-                                      '${_formatBytes(_proofreadingTotalBytes!)}'
-                                : _formatBytes(_proofreadingDownloadedBytes!),
+                            _proofreadingFeature.totalBytes != null &&
+                                    _proofreadingFeature.totalBytes! > 0
+                                ? '${_formatBytes(_proofreadingFeature.downloadedBytes!)} of '
+                                      '${_formatBytes(_proofreadingFeature.totalBytes!)}'
+                                : _formatBytes(
+                                    _proofreadingFeature.downloadedBytes!,
+                                  ),
                           ),
                         ],
                       ],
@@ -5012,37 +4734,39 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
               const Text('Text to proofread:'),
               const SizedBox(height: 12),
               TextField(
-                controller: _proofreadingController,
-                enabled: !_isRunningProofreading,
+                controller: _proofreadingFeature.inputController,
+                enabled: !_proofreadingFeature.isRunning,
                 minLines: 4,
                 maxLines: 8,
                 onChanged: (_) => setState(() {}),
                 decoration: InputDecoration(
                   border: const OutlineInputBorder(),
                   helperText:
-                      '${_proofreadingController.text.length} characters · keep under 256 tokens',
+                      '${_proofreadingFeature.inputController.text.length} characters · keep under 256 tokens',
                 ),
               ),
               const SizedBox(height: 16),
               FilledButton.icon(
                 onPressed:
-                    _proofreadingStatus == 'AVAILABLE' &&
-                        !_isRunningProofreading &&
+                    _proofreadingFeature.status == 'AVAILABLE' &&
+                        !_proofreadingFeature.isRunning &&
                         !_isRunningPrompt &&
                         !_isRunningSummarization &&
                         !_isRunningRewriting &&
                         !_isRunningImageDescription &&
                         hasValidProofreadingInput
-                    ? _runProofreading
+                    ? _proofreadingFeature.run
                     : null,
-                icon: _isRunningProofreading
+                icon: _proofreadingFeature.isRunning
                     ? const SizedBox.square(
                         dimension: 20,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.play_arrow),
                 label: Text(
-                  _isRunningProofreading ? 'Proofreading…' : 'Proofread text',
+                  _proofreadingFeature.isRunning
+                      ? 'Proofreading…'
+                      : 'Proofread text',
                 ),
               ),
               const SizedBox(height: 16),
@@ -5053,37 +4777,38 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       Text(
-                        'Status: ${_isRunningProofreading
+                        'Status: ${_proofreadingFeature.isRunning
                             ? 'Proofreading…'
-                            : _proofreadingError != null
+                            : _proofreadingFeature.error != null
                             ? 'Error'
-                            : _proofreadingOutput.isNotEmpty
+                            : _proofreadingFeature.output.isNotEmpty
                             ? 'Completed'
                             : 'Not run'}',
                         style: const TextStyle(fontWeight: FontWeight.bold),
                       ),
-                      if (_proofreadingElapsedMilliseconds != null) ...[
+                      if (_proofreadingFeature.elapsedMilliseconds != null) ...[
                         const SizedBox(height: 8),
                         Text(
                           'Processing time: '
-                          '${_formatElapsedTime(_proofreadingElapsedMilliseconds!)}',
+                          '${_formatElapsedTime(_proofreadingFeature.elapsedMilliseconds!)}',
                         ),
                       ],
-                      if (_proofreadingSuggestionCount != null) ...[
+                      if (_proofreadingFeature.suggestionCount != null) ...[
                         const SizedBox(height: 8),
                         Text(
-                          'Suggestions returned: $_proofreadingSuggestionCount '
+                          'Suggestions returned: '
+                          '${_proofreadingFeature.suggestionCount} '
                           '(showing highest confidence)',
                         ),
                       ],
-                      if (_submittedProofreadingInput != null) ...[
+                      if (_proofreadingFeature.submittedInput != null) ...[
                         const SizedBox(height: 16),
                         const Text(
                           'Exact input sent:',
                           style: TextStyle(fontWeight: FontWeight.bold),
                         ),
                         const SizedBox(height: 8),
-                        SelectableText(_submittedProofreadingInput!),
+                        SelectableText(_proofreadingFeature.submittedInput!),
                       ],
                       const SizedBox(height: 16),
                       const Text(
@@ -5092,14 +4817,14 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
                       ),
                       const SizedBox(height: 8),
                       SelectableText(
-                        _proofreadingOutput.isEmpty
+                        _proofreadingFeature.output.isEmpty
                             ? 'The proofread text will appear here.'
-                            : _proofreadingOutput,
+                            : _proofreadingFeature.output,
                       ),
-                      if (_proofreadingError != null) ...[
+                      if (_proofreadingFeature.error != null) ...[
                         const SizedBox(height: 16),
                         SelectableText(
-                          _proofreadingError!,
+                          _proofreadingFeature.error!,
                           style: TextStyle(color: colors.error),
                         ),
                       ],
@@ -5172,11 +4897,11 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
                         _isRunningPrompt ||
                         _isRunningSummarization ||
                         _isRunningRewriting ||
-                        _isRunningProofreading ||
+                        _proofreadingFeature.isRunning ||
                         _isStartingDownload ||
                         _isStartingSummarizationDownload ||
                         _isStartingRewritingDownload ||
-                        _isStartingProofreadingDownload
+                        _proofreadingFeature.isStartingDownload
                     ? null
                     : _checkImageDescriptionStatus,
                 icon: _isCheckingImageDescription
@@ -5199,11 +4924,11 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
                           _isStartingDownload ||
                           _isStartingSummarizationDownload ||
                           _isStartingRewritingDownload ||
-                          _isStartingProofreadingDownload ||
+                          _proofreadingFeature.isStartingDownload ||
                           _isRunningPrompt ||
                           _isRunningSummarization ||
                           _isRunningRewriting ||
-                          _isRunningProofreading ||
+                          _proofreadingFeature.isRunning ||
                           _isRunningImageDescription
                       ? null
                       : _startImageDescriptionDownload,
@@ -5325,7 +5050,7 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
                         !_isRunningPrompt &&
                         !_isRunningSummarization &&
                         !_isRunningRewriting &&
-                        !_isRunningProofreading
+                        !_proofreadingFeature.isRunning
                     ? _runImageDescription
                     : null,
                 icon: _isRunningImageDescription
