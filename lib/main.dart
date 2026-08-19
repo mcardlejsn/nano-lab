@@ -31,6 +31,16 @@ class NanoStatusScreen extends StatefulWidget {
   State<NanoStatusScreen> createState() => _NanoStatusScreenState();
 }
 
+enum _NanoLabSection {
+  status,
+  prompt,
+  summarization,
+  rewriting,
+  proofreading,
+  imageDescription,
+  speechRecognition,
+}
+
 class _PromptRun {
   _PromptRun({
     required this.number,
@@ -71,6 +81,14 @@ class _PromptRun {
 }
 
 class _NanoStatusScreenState extends State<NanoStatusScreen> {
+  final GlobalKey _statusSectionKey = GlobalKey();
+  final GlobalKey _promptSectionKey = GlobalKey();
+  final GlobalKey _summarizationSectionKey = GlobalKey();
+  final GlobalKey _rewritingSectionKey = GlobalKey();
+  final GlobalKey _proofreadingSectionKey = GlobalKey();
+  final GlobalKey _imageDescriptionSectionKey = GlobalKey();
+  final GlobalKey _speechRecognitionSectionKey = GlobalKey();
+
   static const _nativeChannel = MethodChannel(
     'com.mycarejournals.nano_lab/native',
   );
@@ -2907,6 +2925,46 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
     );
   }
 
+  void _jumpToSection(_NanoLabSection section) {
+    final GlobalKey sectionKey;
+
+    switch (section) {
+      case _NanoLabSection.status:
+        sectionKey = _statusSectionKey;
+        break;
+      case _NanoLabSection.prompt:
+        sectionKey = _promptSectionKey;
+        break;
+      case _NanoLabSection.summarization:
+        sectionKey = _summarizationSectionKey;
+        break;
+      case _NanoLabSection.rewriting:
+        sectionKey = _rewritingSectionKey;
+        break;
+      case _NanoLabSection.proofreading:
+        sectionKey = _proofreadingSectionKey;
+        break;
+      case _NanoLabSection.imageDescription:
+        sectionKey = _imageDescriptionSectionKey;
+        break;
+      case _NanoLabSection.speechRecognition:
+        sectionKey = _speechRecognitionSectionKey;
+        break;
+    }
+
+    final sectionContext = sectionKey.currentContext;
+    if (sectionContext == null) {
+      return;
+    }
+
+    Scrollable.ensureVisible(
+      sectionContext,
+      duration: const Duration(milliseconds: 450),
+      curve: Curves.easeInOut,
+      alignment: 0.05,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
@@ -3008,7 +3066,99 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
     }
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Nano Lab')),
+      appBar: AppBar(
+        title: const Text('Nano Lab'),
+        actions: [
+          PopupMenuButton<_NanoLabSection>(
+            tooltip: 'Jump to test',
+            onSelected: _jumpToSection,
+            itemBuilder: (context) => const [
+              PopupMenuItem(
+                value: _NanoLabSection.status,
+                child: Row(
+                  children: [
+                    Icon(Icons.memory),
+                    SizedBox(width: 12),
+                    Text('Gemini Nano status'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: _NanoLabSection.prompt,
+                child: Row(
+                  children: [
+                    Icon(Icons.tune),
+                    SizedBox(width: 12),
+                    Text('Prompt and Top-K'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: _NanoLabSection.summarization,
+                child: Row(
+                  children: [
+                    Icon(Icons.summarize),
+                    SizedBox(width: 12),
+                    Text('Summarization'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: _NanoLabSection.rewriting,
+                child: Row(
+                  children: [
+                    Icon(Icons.edit_note),
+                    SizedBox(width: 12),
+                    Text('Rewriting'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: _NanoLabSection.proofreading,
+                child: Row(
+                  children: [
+                    Icon(Icons.spellcheck),
+                    SizedBox(width: 12),
+                    Text('Proofreading'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: _NanoLabSection.imageDescription,
+                child: Row(
+                  children: [
+                    Icon(Icons.image_search),
+                    SizedBox(width: 12),
+                    Text('Image description'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: _NanoLabSection.speechRecognition,
+                child: Row(
+                  children: [
+                    Icon(Icons.mic_none),
+                    SizedBox(width: 12),
+                    Text('Speech recognition'),
+                  ],
+                ),
+              ),
+            ],
+            child: const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.list_alt),
+                  SizedBox(width: 6),
+                  Text('Tests'),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+        ],
+      ),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
@@ -3017,6 +3167,7 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
             children: [
               Text(
                 'Gemini Nano status',
+                key: _statusSectionKey,
                 style: Theme.of(context).textTheme.headlineSmall,
               ),
               const SizedBox(height: 12),
@@ -3199,6 +3350,7 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
               const SizedBox(height: 40),
               Text(
                 'Prompt test',
+                key: _promptSectionKey,
                 style: Theme.of(context).textTheme.headlineSmall,
               ),
               const SizedBox(height: 12),
@@ -3565,6 +3717,7 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
               const SizedBox(height: 40),
               Text(
                 'Dedicated summarization test',
+                key: _summarizationSectionKey,
                 style: Theme.of(context).textTheme.headlineSmall,
               ),
               const SizedBox(height: 12),
@@ -3798,6 +3951,7 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
               const SizedBox(height: 40),
               Text(
                 'Dedicated rewriting test',
+                key: _rewritingSectionKey,
                 style: Theme.of(context).textTheme.headlineSmall,
               ),
               const SizedBox(height: 12),
@@ -4028,6 +4182,7 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
               const SizedBox(height: 40),
               Text(
                 'Dedicated proofreading test',
+                key: _proofreadingSectionKey,
                 style: Theme.of(context).textTheme.headlineSmall,
               ),
               const SizedBox(height: 12),
@@ -4262,6 +4417,7 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
               const SizedBox(height: 40),
               Text(
                 'Dedicated image description test',
+                key: _imageDescriptionSectionKey,
                 style: Theme.of(context).textTheme.headlineSmall,
               ),
               const SizedBox(height: 12),
@@ -4553,6 +4709,7 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
               const SizedBox(height: 40),
               Text(
                 'Dedicated speech recognition test',
+                key: _speechRecognitionSectionKey,
                 style: Theme.of(context).textTheme.headlineSmall,
               ),
               const SizedBox(height: 12),
