@@ -5,6 +5,10 @@ import 'package:flutter/services.dart';
 
 import '../features/proofreading/proofreading_controller.dart';
 import '../features/proofreading/proofreading_experiment.dart';
+import '../features/rewriting/rewriting_controller.dart';
+import '../features/rewriting/rewriting_experiment.dart';
+import '../features/summarization/summarization_controller.dart';
+import '../features/summarization/summarization_experiment.dart';
 import '../services/nano_native_service.dart';
 import 'nano_lab_section.dart';
 
@@ -85,44 +89,6 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
   static const _defaultSystemInstruction =
       'Respond using uppercase letters only.';
 
-  static const _defaultSummarizationText =
-      'The fictional town of Alder Cove opened a community tool library in '
-      'April 2026 after residents approved a six-month trial. The library is '
-      'located in a renovated room beside the town hall and is open on '
-      'Tuesdays from 4:00 PM to 8:00 PM and Saturdays from 9:00 AM to 1:00 PM. '
-      'Members can borrow hand tools, gardening equipment, sewing machines, '
-      'and small kitchen appliances for up to seven days. Membership is free, '
-      'but borrowers must be at least eighteen years old and show proof that '
-      'they live in Alder Cove. During the first month, 184 residents joined '
-      'and borrowed 327 items. The most frequently borrowed item was a cordless '
-      'drill, followed by a hedge trimmer and a carpet cleaner. Two items were '
-      'returned late, and one garden rake was returned with a broken handle. '
-      'Volunteers repaired the rake using donated materials, so the town paid '
-      'no repair cost. The project received a startup grant of \$12,500 from '
-      'the fictional North Pine Community Fund. Organizers spent \$8,900 on '
-      'equipment, \$1,600 on shelving, and \$750 on safety supplies. The '
-      'remaining money was reserved for replacement parts and future '
-      'purchases. Before opening, fourteen volunteers completed two evening '
-      'safety workshops led by local carpenter Mara Voss. Borrowers receive a '
-      'short safety guide with each power tool, and first-time users may ask '
-      'for a ten-minute demonstration. Items can be reserved in person or by '
-      'telephone, but the library does not accept reservations more than two '
-      'weeks ahead. If another member is waiting, an item cannot be renewed. '
-      'The town also placed a blue donation bin in the lobby for unused tools. '
-      'By the end of May, residents had donated forty-six items, although nine '
-      'were rejected because they were damaged or missing safety guards. The '
-      'library tracks each loan with a paper receipt and an offline computer '
-      'record. No membership information is shared outside the program. '
-      'Organizers plan to add bicycle repair tools if the permanent budget is '
-      'approved. A resident survey found that 86 percent of respondents wanted '
-      'the trial to continue. The town council will review the program on '
-      'October 12, 2026, before deciding whether to fund it permanently.';
-
-  static const _defaultRewritingText =
-      'hey sam, the fictional Alder Cove tool library opens Tuesday at 4:00 '
-      'PM, and the town council votes on permanent funding October 12, 2026. '
-      'please send me the inventory list by Friday so I can check it.';
-
   static const _speechRecognitionTestPhrase =
       'On Monday, August seventeenth, twenty twenty-six, the fictional '
       'Northbridge office received seventeen packages. Three were labeled '
@@ -134,14 +100,12 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
   late final TextEditingController _seedController;
   late final TextEditingController _topKController;
   late final TextEditingController _candidateCountController;
-  late final TextEditingController _summarizationController;
-  late final TextEditingController _rewritingController;
+  late final SummarizationController _summarizationFeature;
+  late final RewritingController _rewritingFeature;
   late final ProofreadingController _proofreadingFeature;
 
   late final StreamSubscription<dynamic> _downloadSubscription;
   late final StreamSubscription<dynamic> _promptSubscription;
-  late final StreamSubscription<dynamic> _summarizationDownloadSubscription;
-  late final StreamSubscription<dynamic> _rewritingDownloadSubscription;
   late final StreamSubscription<dynamic> _imageDescriptionDownloadSubscription;
   late final StreamSubscription<dynamic> _speechRecognitionDownloadSubscription;
   late final StreamSubscription<dynamic> _speechRecognitionSubscription;
@@ -151,12 +115,6 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
   bool _isRunningPrompt = false;
   bool _isRunningTopKComparison = false;
   int? _topKComparisonStep;
-  bool _isCheckingSummarization = false;
-  bool _isStartingSummarizationDownload = false;
-  bool _isRunningSummarization = false;
-  bool _isCheckingRewriting = false;
-  bool _isStartingRewritingDownload = false;
-  bool _isRunningRewriting = false;
   bool _isCheckingImageDescription = false;
   bool _isStartingImageDescriptionDownload = false;
   bool _isRunningImageDescription = false;
@@ -204,29 +162,6 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
   int? _requestTokens;
   int? _tokenLimit;
 
-  String _summarizationStatus = 'NOT CHECKED';
-  String _summarizationDescription =
-      'Check whether the dedicated ML Kit Summarization API is available.';
-  String? _summarizationError;
-  String? _summarizationDownloadMessage;
-  String? _submittedSummarizationInput;
-  String _summarizationOutput = '';
-  int? _summarizationDownloadedBytes;
-  int? _summarizationTotalBytes;
-  int? _summarizationElapsedMilliseconds;
-
-  String _rewritingStatus = 'NOT CHECKED';
-  String _rewritingDescription =
-      'Check whether the dedicated ML Kit Rewriting API is available.';
-  String? _rewritingError;
-  String? _rewritingDownloadMessage;
-  String? _submittedRewritingInput;
-  String _rewritingOutput = '';
-  int? _rewritingDownloadedBytes;
-  int? _rewritingTotalBytes;
-  int? _rewritingElapsedMilliseconds;
-  int? _rewritingSuggestionCount;
-
   String _imageDescriptionStatus = 'NOT CHECKED';
   String _imageDescriptionDescription =
       'Check whether the dedicated ML Kit Image Description API is available.';
@@ -269,10 +204,11 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
     _seedController = TextEditingController(text: '0');
     _topKController = TextEditingController(text: '3');
     _candidateCountController = TextEditingController(text: '1');
-    _summarizationController = TextEditingController(
-      text: _defaultSummarizationText,
-    );
-    _rewritingController = TextEditingController(text: _defaultRewritingText);
+    _summarizationFeature = SummarizationController(
+      nativeService: _nativeService,
+    )..addListener(_handleSummarizationFeatureChanged);
+    _rewritingFeature = RewritingController(nativeService: _nativeService)
+      ..addListener(_handleRewritingFeatureChanged);
     _proofreadingFeature = ProofreadingController(nativeService: _nativeService)
       ..addListener(_handleProofreadingFeatureChanged);
 
@@ -285,19 +221,6 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
       _handlePromptEvent,
       onError: _handlePromptStreamError,
     );
-
-    _summarizationDownloadSubscription = _nativeService
-        .summarizationDownloadEvents
-        .listen(
-          _handleSummarizationDownloadEvent,
-          onError: _handleSummarizationDownloadStreamError,
-        );
-
-    _rewritingDownloadSubscription = _nativeService.rewritingDownloadEvents
-        .listen(
-          _handleRewritingDownloadEvent,
-          onError: _handleRewritingDownloadStreamError,
-        );
 
     _imageDescriptionDownloadSubscription = _nativeService
         .imageDescriptionDownloadEvents
@@ -340,8 +263,6 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
     _completePromptRun(false);
     _downloadSubscription.cancel();
     _promptSubscription.cancel();
-    _summarizationDownloadSubscription.cancel();
-    _rewritingDownloadSubscription.cancel();
     _imageDescriptionDownloadSubscription.cancel();
     _speechRecognitionDownloadSubscription.cancel();
     _speechRecognitionSubscription.cancel();
@@ -351,8 +272,12 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
     _seedController.dispose();
     _topKController.dispose();
     _candidateCountController.dispose();
-    _summarizationController.dispose();
-    _rewritingController.dispose();
+    _summarizationFeature
+      ..removeListener(_handleSummarizationFeatureChanged)
+      ..dispose();
+    _rewritingFeature
+      ..removeListener(_handleRewritingFeatureChanged)
+      ..dispose();
     _proofreadingFeature
       ..removeListener(_handleProofreadingFeatureChanged)
       ..dispose();
@@ -360,6 +285,18 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
   }
 
   void _handleProofreadingFeatureChanged() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  void _handleSummarizationFeatureChanged() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  void _handleRewritingFeatureChanged() {
     if (mounted) {
       setState(() {});
     }
@@ -566,398 +503,6 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
       if (mounted) {
         setState(() {
           _isStartingDownload = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _checkSummarizationStatus() async {
-    setState(() {
-      _isCheckingSummarization = true;
-      _summarizationStatus = 'CHECKING';
-      _summarizationDescription =
-          'Checking the dedicated Summarization API configuration…';
-      _summarizationError = null;
-    });
-
-    try {
-      final result = await _nativeService.getSummarizationStatus();
-
-      if (!mounted) {
-        return;
-      }
-
-      if (result == null) {
-        setState(() {
-          _summarizationStatus = 'ERROR';
-          _summarizationDescription =
-              'Kotlin returned no summarization status information.';
-        });
-        return;
-      }
-
-      setState(() {
-        _summarizationStatus = result['status']?.toString() ?? 'UNKNOWN';
-        _summarizationDescription =
-            result['description']?.toString() ??
-            'No summarization status description was returned.';
-      });
-    } on PlatformException catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _summarizationStatus = 'ERROR';
-        _summarizationDescription =
-            error.message ?? 'Summarization status detection failed.';
-        _summarizationError = 'Platform error: ${error.code}';
-      });
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _summarizationStatus = 'ERROR';
-        _summarizationDescription =
-            'Unexpected summarization status-check failure.';
-        _summarizationError = error.toString();
-      });
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isCheckingSummarization = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _startSummarizationDownload() async {
-    setState(() {
-      _isStartingSummarizationDownload = true;
-      _summarizationDownloadMessage =
-          'Requesting the summarization asset download…';
-      _summarizationDownloadedBytes = null;
-      _summarizationTotalBytes = null;
-      _summarizationError = null;
-    });
-
-    try {
-      await _nativeService.startSummarizationDownload();
-
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _summarizationStatus = 'DOWNLOADING';
-        _summarizationDescription =
-            'The required summarization assets are downloading.';
-      });
-    } on PlatformException catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _summarizationDownloadMessage = null;
-        _summarizationError =
-            '${error.message ?? 'The summarization download could not be started.'}\n'
-            'Platform error: ${error.code}';
-      });
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _summarizationDownloadMessage = null;
-        _summarizationError = 'Unexpected summarization download error: $error';
-      });
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isStartingSummarizationDownload = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _runSummarization() async {
-    final input = _summarizationController.text;
-    final stopwatch = Stopwatch()..start();
-
-    setState(() {
-      _isRunningSummarization = true;
-      _submittedSummarizationInput = input;
-      _summarizationOutput = '';
-      _summarizationElapsedMilliseconds = null;
-      _summarizationError = null;
-    });
-
-    try {
-      final result = await _nativeService.runSummarization(input);
-      stopwatch.stop();
-
-      if (!mounted) {
-        return;
-      }
-
-      if (result == null) {
-        setState(() {
-          _summarizationElapsedMilliseconds = stopwatch.elapsedMilliseconds;
-          _summarizationError = 'Kotlin returned no summarization result.';
-        });
-        return;
-      }
-
-      final nativeInput = result['input']?.toString();
-      if (nativeInput != input) {
-        setState(() {
-          _summarizationElapsedMilliseconds = stopwatch.elapsedMilliseconds;
-          _summarizationError =
-              'The native summarization input did not match the displayed input.';
-        });
-        return;
-      }
-
-      setState(() {
-        _summarizationOutput = result['output']?.toString() ?? '';
-        _summarizationElapsedMilliseconds =
-            _readInteger(result['elapsedMilliseconds']) ??
-            stopwatch.elapsedMilliseconds;
-      });
-    } on PlatformException catch (error) {
-      stopwatch.stop();
-
-      if (!mounted) {
-        return;
-      }
-
-      final details = error.details;
-      final nativeElapsedMilliseconds = details is Map
-          ? _readInteger(details['elapsedMilliseconds'])
-          : null;
-
-      setState(() {
-        _summarizationElapsedMilliseconds =
-            nativeElapsedMilliseconds ?? stopwatch.elapsedMilliseconds;
-        _summarizationError =
-            '${error.message ?? 'Gemini Nano summarization failed.'}\n'
-            'Platform error: ${error.code}';
-      });
-    } catch (error) {
-      stopwatch.stop();
-
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _summarizationElapsedMilliseconds = stopwatch.elapsedMilliseconds;
-        _summarizationError = 'Unexpected summarization error: $error';
-      });
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isRunningSummarization = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _checkRewritingStatus() async {
-    setState(() {
-      _isCheckingRewriting = true;
-      _rewritingStatus = 'CHECKING';
-      _rewritingDescription =
-          'Checking the dedicated Rewriting API configuration…';
-      _rewritingError = null;
-    });
-
-    try {
-      final result = await _nativeService.getRewritingStatus();
-
-      if (!mounted) {
-        return;
-      }
-
-      if (result == null) {
-        setState(() {
-          _rewritingStatus = 'ERROR';
-          _rewritingDescription =
-              'Kotlin returned no rewriting status information.';
-        });
-        return;
-      }
-
-      setState(() {
-        _rewritingStatus = result['status']?.toString() ?? 'UNKNOWN';
-        _rewritingDescription =
-            result['description']?.toString() ??
-            'No rewriting status description was returned.';
-      });
-    } on PlatformException catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _rewritingStatus = 'ERROR';
-        _rewritingDescription =
-            error.message ?? 'Rewriting status detection failed.';
-        _rewritingError = 'Platform error: ${error.code}';
-      });
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _rewritingStatus = 'ERROR';
-        _rewritingDescription = 'Unexpected rewriting status-check failure.';
-        _rewritingError = error.toString();
-      });
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isCheckingRewriting = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _startRewritingDownload() async {
-    setState(() {
-      _isStartingRewritingDownload = true;
-      _rewritingDownloadMessage = 'Requesting the rewriting asset download…';
-      _rewritingDownloadedBytes = null;
-      _rewritingTotalBytes = null;
-      _rewritingError = null;
-    });
-
-    try {
-      await _nativeService.startRewritingDownload();
-
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _rewritingStatus = 'DOWNLOADING';
-        _rewritingDescription =
-            'The required rewriting assets are downloading.';
-      });
-    } on PlatformException catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _rewritingDownloadMessage = null;
-        _rewritingError =
-            '${error.message ?? 'The rewriting download could not be started.'}\n'
-            'Platform error: ${error.code}';
-      });
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _rewritingDownloadMessage = null;
-        _rewritingError = 'Unexpected rewriting download error: $error';
-      });
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isStartingRewritingDownload = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _runRewriting() async {
-    final input = _rewritingController.text;
-    final stopwatch = Stopwatch()..start();
-
-    setState(() {
-      _isRunningRewriting = true;
-      _submittedRewritingInput = input;
-      _rewritingOutput = '';
-      _rewritingElapsedMilliseconds = null;
-      _rewritingSuggestionCount = null;
-      _rewritingError = null;
-    });
-
-    try {
-      final result = await _nativeService.runRewriting(input);
-      stopwatch.stop();
-
-      if (!mounted) {
-        return;
-      }
-
-      if (result == null) {
-        setState(() {
-          _rewritingElapsedMilliseconds = stopwatch.elapsedMilliseconds;
-          _rewritingError = 'Kotlin returned no rewriting result.';
-        });
-        return;
-      }
-
-      final nativeInput = result['input']?.toString();
-      if (nativeInput != input) {
-        setState(() {
-          _rewritingElapsedMilliseconds = stopwatch.elapsedMilliseconds;
-          _rewritingError =
-              'The native rewriting input did not match the displayed input.';
-        });
-        return;
-      }
-
-      setState(() {
-        _rewritingOutput = result['output']?.toString() ?? '';
-        _rewritingSuggestionCount = _readInteger(result['suggestionCount']);
-        _rewritingElapsedMilliseconds =
-            _readInteger(result['elapsedMilliseconds']) ??
-            stopwatch.elapsedMilliseconds;
-      });
-    } on PlatformException catch (error) {
-      stopwatch.stop();
-
-      if (!mounted) {
-        return;
-      }
-
-      final details = error.details;
-      final nativeElapsedMilliseconds = details is Map
-          ? _readInteger(details['elapsedMilliseconds'])
-          : null;
-
-      setState(() {
-        _rewritingElapsedMilliseconds =
-            nativeElapsedMilliseconds ?? stopwatch.elapsedMilliseconds;
-        _rewritingError =
-            '${error.message ?? 'Gemini Nano rewriting failed.'}\n'
-            'Platform error: ${error.code}';
-      });
-    } catch (error) {
-      stopwatch.stop();
-
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _rewritingElapsedMilliseconds = stopwatch.elapsedMilliseconds;
-        _rewritingError = 'Unexpected rewriting error: $error';
-      });
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isRunningRewriting = false;
         });
       }
     }
@@ -1850,113 +1395,6 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
     });
   }
 
-  void _handleSummarizationDownloadEvent(dynamic event) {
-    if (!mounted || event is! Map) {
-      return;
-    }
-
-    final eventName = event['event']?.toString();
-
-    setState(() {
-      switch (eventName) {
-        case 'started':
-          _summarizationStatus = 'DOWNLOADING';
-          _summarizationDescription =
-              'The required summarization assets are downloading.';
-          _summarizationTotalBytes = _readInteger(event['totalBytes']);
-          _summarizationDownloadedBytes = 0;
-          _summarizationDownloadMessage = 'Summarization download started.';
-          break;
-
-        case 'progress':
-          _summarizationStatus = 'DOWNLOADING';
-          _summarizationDownloadedBytes = _readInteger(
-            event['downloadedBytes'],
-          );
-          _summarizationTotalBytes =
-              _readInteger(event['totalBytes']) ?? _summarizationTotalBytes;
-          _summarizationDownloadMessage = 'Downloading summarization assets…';
-          break;
-
-        case 'completed':
-          _summarizationStatus = 'AVAILABLE';
-          _summarizationDescription =
-              'The dedicated Summarization API is ready to use.';
-          _summarizationDownloadedBytes =
-              _readInteger(event['downloadedBytes']) ??
-              _summarizationTotalBytes;
-          _summarizationTotalBytes =
-              _readInteger(event['totalBytes']) ?? _summarizationTotalBytes;
-          _summarizationDownloadMessage =
-              'Summarization download completed successfully.';
-          _summarizationError = null;
-          break;
-
-        case 'failed':
-          _summarizationStatus = 'DOWNLOADABLE';
-          _summarizationDescription =
-              'This device supports summarization, but its assets are not ready.';
-          _summarizationDownloadMessage = null;
-          _summarizationError =
-              '${event['message'] ?? 'Summarization asset download failed.'}\n'
-              'GenAI error code: ${event['errorCode'] ?? 'unknown'}';
-          break;
-      }
-    });
-  }
-
-  void _handleRewritingDownloadEvent(dynamic event) {
-    if (!mounted || event is! Map) {
-      return;
-    }
-
-    final eventName = event['event']?.toString();
-
-    setState(() {
-      switch (eventName) {
-        case 'started':
-          _rewritingStatus = 'DOWNLOADING';
-          _rewritingDescription =
-              'The required rewriting assets are downloading.';
-          _rewritingTotalBytes = _readInteger(event['totalBytes']);
-          _rewritingDownloadedBytes = 0;
-          _rewritingDownloadMessage = 'Rewriting download started.';
-          break;
-
-        case 'progress':
-          _rewritingStatus = 'DOWNLOADING';
-          _rewritingDownloadedBytes = _readInteger(event['downloadedBytes']);
-          _rewritingTotalBytes =
-              _readInteger(event['totalBytes']) ?? _rewritingTotalBytes;
-          _rewritingDownloadMessage = 'Downloading rewriting assets…';
-          break;
-
-        case 'completed':
-          _rewritingStatus = 'AVAILABLE';
-          _rewritingDescription =
-              'The dedicated Rewriting API is ready to use.';
-          _rewritingDownloadedBytes =
-              _readInteger(event['downloadedBytes']) ?? _rewritingTotalBytes;
-          _rewritingTotalBytes =
-              _readInteger(event['totalBytes']) ?? _rewritingTotalBytes;
-          _rewritingDownloadMessage =
-              'Rewriting download completed successfully.';
-          _rewritingError = null;
-          break;
-
-        case 'failed':
-          _rewritingStatus = 'DOWNLOADABLE';
-          _rewritingDescription =
-              'This device supports rewriting, but its assets are not ready.';
-          _rewritingDownloadMessage = null;
-          _rewritingError =
-              '${event['message'] ?? 'Rewriting asset download failed.'}\n'
-              'GenAI error code: ${event['errorCode'] ?? 'unknown'}';
-          break;
-      }
-    });
-  }
-
   void _handleImageDescriptionDownloadEvent(dynamic event) {
     if (!mounted || event is! Map) {
       return;
@@ -2301,29 +1739,6 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
     _completePromptRun(false);
   }
 
-  void _handleSummarizationDownloadStreamError(Object error) {
-    if (!mounted) {
-      return;
-    }
-
-    setState(() {
-      _summarizationDownloadMessage = null;
-      _summarizationError =
-          'Summarization download progress stream error: $error';
-    });
-  }
-
-  void _handleRewritingDownloadStreamError(Object error) {
-    if (!mounted) {
-      return;
-    }
-
-    setState(() {
-      _rewritingDownloadMessage = null;
-      _rewritingError = 'Rewriting download progress stream error: $error';
-    });
-  }
-
   void _handleImageDescriptionDownloadStreamError(Object error) {
     if (!mounted) {
       return;
@@ -2377,38 +1792,6 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
 
   Color _statusColor(ColorScheme colors) {
     switch (_status) {
-      case 'AVAILABLE':
-        return Colors.green;
-      case 'DOWNLOADABLE':
-        return Colors.orange;
-      case 'DOWNLOADING':
-        return Colors.blue;
-      case 'UNAVAILABLE':
-      case 'ERROR':
-        return colors.error;
-      default:
-        return colors.outline;
-    }
-  }
-
-  Color _summarizationStatusColor(ColorScheme colors) {
-    switch (_summarizationStatus) {
-      case 'AVAILABLE':
-        return Colors.green;
-      case 'DOWNLOADABLE':
-        return Colors.orange;
-      case 'DOWNLOADING':
-        return Colors.blue;
-      case 'UNAVAILABLE':
-      case 'ERROR':
-        return colors.error;
-      default:
-        return colors.outline;
-    }
-  }
-
-  Color _rewritingStatusColor(ColorScheme colors) {
-    switch (_rewritingStatus) {
       case 'AVAILABLE':
         return Colors.green;
       case 'DOWNLOADABLE':
@@ -3075,84 +2458,17 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
 
       case NanoLabSection.summarization:
         return [
-          _buildEverydayReadinessCard(
-            status: _summarizationStatus,
-            description: _summarizationDescription,
-            isChecking: _isCheckingSummarization,
-            onCheck: _checkSummarizationStatus,
-            isStartingDownload: _isStartingSummarizationDownload,
-            onDownload: _startSummarizationDownload,
-            error: _summarizationError,
-            downloadMessage: _summarizationDownloadMessage,
-            downloadedBytes: _summarizationDownloadedBytes,
-            totalBytes: _summarizationTotalBytes,
-          ),
-          const SizedBox(height: 12),
-          _buildEverydayInputCard(
-            'Fixed fictional article',
-            _summarizationController.text,
-          ),
-          const SizedBox(height: 12),
-          FilledButton.icon(
-            onPressed:
-                _summarizationStatus == 'AVAILABLE' && !_isRunningSummarization
-                ? _runSummarization
-                : null,
-            icon: _isRunningSummarization
-                ? const SizedBox.square(
-                    dimension: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.play_arrow),
-            label: Text(
-              _isRunningSummarization ? 'Summarizing…' : 'Run summary test',
-            ),
-          ),
-          const SizedBox(height: 12),
-          _buildEverydayResultCard(
-            output: _summarizationOutput,
-            elapsedMilliseconds: _summarizationElapsedMilliseconds,
+          SummarizationExperiment(
+            controller: _summarizationFeature,
+            presentation: SummarizationPresentation.everyday,
           ),
         ];
 
       case NanoLabSection.rewriting:
         return [
-          _buildEverydayReadinessCard(
-            status: _rewritingStatus,
-            description: _rewritingDescription,
-            isChecking: _isCheckingRewriting,
-            onCheck: _checkRewritingStatus,
-            isStartingDownload: _isStartingRewritingDownload,
-            onDownload: _startRewritingDownload,
-            error: _rewritingError,
-            downloadMessage: _rewritingDownloadMessage,
-            downloadedBytes: _rewritingDownloadedBytes,
-            totalBytes: _rewritingTotalBytes,
-          ),
-          const SizedBox(height: 12),
-          _buildEverydayInputCard(
-            'Fixed fictional message',
-            _rewritingController.text,
-          ),
-          const SizedBox(height: 12),
-          FilledButton.icon(
-            onPressed: _rewritingStatus == 'AVAILABLE' && !_isRunningRewriting
-                ? _runRewriting
-                : null,
-            icon: _isRunningRewriting
-                ? const SizedBox.square(
-                    dimension: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.play_arrow),
-            label: Text(
-              _isRunningRewriting ? 'Rewriting…' : 'Run rewriting test',
-            ),
-          ),
-          const SizedBox(height: 12),
-          _buildEverydayResultCard(
-            output: _rewritingOutput,
-            elapsedMilliseconds: _rewritingElapsedMilliseconds,
+          RewritingExperiment(
+            controller: _rewritingFeature,
+            presentation: RewritingPresentation.everyday,
           ),
         ];
 
@@ -3329,8 +2645,6 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
 
     final colors = Theme.of(context).colorScheme;
     final statusColor = _statusColor(colors);
-    final summarizationStatusColor = _summarizationStatusColor(colors);
-    final rewritingStatusColor = _rewritingStatusColor(colors);
     final imageDescriptionStatusColor = _imageDescriptionStatusColor(colors);
     final speechRecognitionStatusColor = _speechRecognitionStatusColor(colors);
     final maxOutputTokens = int.tryParse(_maxOutputTokensController.text);
@@ -3345,9 +2659,6 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
     final candidateCount = int.tryParse(_candidateCountController.text);
     final hasValidCandidateCount =
         candidateCount != null && candidateCount >= 1 && candidateCount <= 8;
-    final hasValidSummarizationInput =
-        _summarizationController.text.length > 400;
-    final hasValidRewritingInput = _rewritingController.text.trim().isNotEmpty;
     final imageDescriptionAspectRatio =
         _imageDescriptionTestImageWidth != null &&
             _imageDescriptionTestImageHeight != null &&
@@ -3357,40 +2668,21 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
     final isOtherGenAiOperationInProgress =
         _isStartingDownload ||
         _isRunningPrompt ||
-        _isStartingSummarizationDownload ||
-        _isRunningSummarization ||
-        _isStartingRewritingDownload ||
-        _isRunningRewriting ||
+        _summarizationFeature.isStartingDownload ||
+        _summarizationFeature.isRunning ||
+        _rewritingFeature.isStartingDownload ||
+        _rewritingFeature.isRunning ||
         _proofreadingFeature.isStartingDownload ||
         _proofreadingFeature.isRunning ||
         _isStartingImageDescriptionDownload ||
         _isRunningImageDescription;
 
     double? progress;
-    double? summarizationProgress;
-    double? rewritingProgress;
     double? imageDescriptionProgress;
     double? speechRecognitionProgress;
 
     if (_downloadedBytes != null && _totalBytes != null && _totalBytes! > 0) {
       progress = (_downloadedBytes! / _totalBytes!).clamp(0.0, 1.0).toDouble();
-    }
-
-    if (_summarizationDownloadedBytes != null &&
-        _summarizationTotalBytes != null &&
-        _summarizationTotalBytes! > 0) {
-      summarizationProgress =
-          (_summarizationDownloadedBytes! / _summarizationTotalBytes!)
-              .clamp(0.0, 1.0)
-              .toDouble();
-    }
-
-    if (_rewritingDownloadedBytes != null &&
-        _rewritingTotalBytes != null &&
-        _rewritingTotalBytes! > 0) {
-      rewritingProgress = (_rewritingDownloadedBytes! / _rewritingTotalBytes!)
-          .clamp(0.0, 1.0)
-          .toDouble();
     }
 
     if (_imageDescriptionDownloadedBytes != null &&
@@ -3536,10 +2828,10 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
                     _isChecking ||
                         _isStartingDownload ||
                         _isRunningPrompt ||
-                        _isRunningSummarization ||
-                        _isStartingSummarizationDownload ||
-                        _isRunningRewriting ||
-                        _isStartingRewritingDownload ||
+                        _summarizationFeature.isRunning ||
+                        _summarizationFeature.isStartingDownload ||
+                        _rewritingFeature.isRunning ||
+                        _rewritingFeature.isStartingDownload ||
                         _proofreadingFeature.isRunning ||
                         _proofreadingFeature.isStartingDownload ||
                         _isRunningImageDescription ||
@@ -3645,10 +2937,10 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
                 onPressed:
                     _isChecking ||
                         _isStartingDownload ||
-                        _isRunningSummarization ||
-                        _isStartingSummarizationDownload ||
-                        _isRunningRewriting ||
-                        _isStartingRewritingDownload ||
+                        _summarizationFeature.isRunning ||
+                        _summarizationFeature.isStartingDownload ||
+                        _rewritingFeature.isRunning ||
+                        _rewritingFeature.isStartingDownload ||
                         _proofreadingFeature.isRunning ||
                         _proofreadingFeature.isStartingDownload ||
                         _isRunningImageDescription ||
@@ -3670,10 +2962,10 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
                 FilledButton.tonalIcon(
                   onPressed:
                       _isStartingDownload ||
-                          _isStartingSummarizationDownload ||
-                          _isRunningSummarization ||
-                          _isStartingRewritingDownload ||
-                          _isRunningRewriting ||
+                          _summarizationFeature.isStartingDownload ||
+                          _summarizationFeature.isRunning ||
+                          _rewritingFeature.isStartingDownload ||
+                          _rewritingFeature.isRunning ||
                           _proofreadingFeature.isStartingDownload ||
                           _proofreadingFeature.isRunning ||
                           _isStartingImageDescriptionDownload ||
@@ -3821,9 +3113,9 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
                 onPressed:
                     _status == 'AVAILABLE' &&
                         !_isRunningPrompt &&
-                        !_isRunningSummarization &&
-                        !_isRunningRewriting &&
-                        !_isStartingRewritingDownload &&
+                        !_summarizationFeature.isRunning &&
+                        !_rewritingFeature.isRunning &&
+                        !_rewritingFeature.isStartingDownload &&
                         !_proofreadingFeature.isRunning &&
                         !_proofreadingFeature.isStartingDownload &&
                         !_isRunningImageDescription &&
@@ -3866,8 +3158,8 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
                         onPressed:
                             _status == 'AVAILABLE' &&
                                 !_isRunningPrompt &&
-                                !_isRunningSummarization &&
-                                !_isRunningRewriting &&
+                                !_summarizationFeature.isRunning &&
+                                !_rewritingFeature.isRunning &&
                                 !_proofreadingFeature.isRunning &&
                                 !_isRunningImageDescription &&
                                 hasValidMaxOutputTokens &&
@@ -3896,8 +3188,8 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
               FilledButton.tonalIcon(
                 onPressed:
                     !_isRunningPrompt &&
-                        !_isRunningSummarization &&
-                        !_isRunningRewriting &&
+                        !_summarizationFeature.isRunning &&
+                        !_rewritingFeature.isRunning &&
                         !_proofreadingFeature.isRunning &&
                         !_isRunningImageDescription &&
                         _completedRuns.isNotEmpty
@@ -4061,469 +3353,44 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
                 ),
               ],
               const SizedBox(height: 40),
-              Text(
-                'Dedicated summarization test',
-                key: _summarizationSectionKey,
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                'Uses the ML Kit Summarization API with fixed English article '
-                'input and one-bullet output. Article input must contain more '
-                'than 400 characters.',
-              ),
-              const SizedBox(height: 20),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: summarizationStatusColor.withValues(
-                            alpha: 0.12,
-                          ),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: summarizationStatusColor),
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 8,
-                          ),
-                          child: Text(
-                            _summarizationStatus,
-                            style: TextStyle(
-                              color: summarizationStatusColor,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      SelectableText(_summarizationDescription),
-                      if (_summarizationError != null) ...[
-                        const SizedBox(height: 16),
-                        SelectableText(
-                          _summarizationError!,
-                          style: TextStyle(color: colors.error),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              FilledButton.icon(
-                onPressed:
-                    _isCheckingSummarization ||
-                        _isStartingSummarizationDownload ||
-                        _isRunningSummarization ||
-                        _isRunningPrompt ||
-                        _isStartingDownload ||
-                        _isRunningRewriting ||
-                        _isStartingRewritingDownload ||
-                        _proofreadingFeature.isRunning ||
-                        _proofreadingFeature.isStartingDownload ||
-                        _isRunningImageDescription ||
-                        _isStartingImageDescriptionDownload
-                    ? null
-                    : _checkSummarizationStatus,
-                icon: _isCheckingSummarization
-                    ? const SizedBox.square(
-                        dimension: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.summarize),
-                label: Text(
-                  _isCheckingSummarization
-                      ? 'Checking…'
-                      : 'Check summarization status',
-                ),
-              ),
-              if (_summarizationStatus == 'DOWNLOADABLE') ...[
-                const SizedBox(height: 12),
-                FilledButton.tonalIcon(
-                  onPressed:
-                      _isStartingSummarizationDownload ||
-                          _isStartingDownload ||
-                          _isRunningPrompt ||
-                          _isRunningSummarization ||
-                          _isStartingRewritingDownload ||
-                          _isRunningRewriting ||
-                          _proofreadingFeature.isStartingDownload ||
-                          _proofreadingFeature.isRunning ||
-                          _isStartingImageDescriptionDownload ||
-                          _isRunningImageDescription
-                      ? null
-                      : _startSummarizationDownload,
-                  icon: _isStartingSummarizationDownload
-                      ? const SizedBox.square(
-                          dimension: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.download),
-                  label: Text(
-                    _isStartingSummarizationDownload
-                        ? 'Starting download…'
-                        : 'Download summarization assets',
-                  ),
-                ),
-              ],
-              if (_summarizationDownloadMessage != null) ...[
-                const SizedBox(height: 16),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(20),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        LinearProgressIndicator(value: summarizationProgress),
-                        const SizedBox(height: 12),
-                        Text(_summarizationDownloadMessage!),
-                        if (_summarizationDownloadedBytes != null) ...[
-                          const SizedBox(height: 8),
-                          Text(
-                            _summarizationTotalBytes != null &&
-                                    _summarizationTotalBytes! > 0
-                                ? '${_formatBytes(_summarizationDownloadedBytes!)} of '
-                                      '${_formatBytes(_summarizationTotalBytes!)}'
-                                : _formatBytes(_summarizationDownloadedBytes!),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-              const SizedBox(height: 24),
-              const Text('Article text:'),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _summarizationController,
-                enabled: !_isRunningSummarization,
-                minLines: 10,
-                maxLines: 18,
-                onChanged: (_) => setState(() {}),
-                decoration: InputDecoration(
-                  border: const OutlineInputBorder(),
-                  helperText:
-                      '${_summarizationController.text.length} characters',
-                  errorText:
-                      _summarizationController.text.isEmpty ||
-                          hasValidSummarizationInput
-                      ? null
-                      : 'Enter more than 400 characters.',
-                ),
-              ),
-              const SizedBox(height: 16),
-              FilledButton.icon(
-                onPressed:
-                    _summarizationStatus == 'AVAILABLE' &&
-                        !_isRunningSummarization &&
-                        !_isRunningPrompt &&
-                        !_isRunningRewriting &&
-                        !_proofreadingFeature.isRunning &&
-                        !_isRunningImageDescription &&
-                        hasValidSummarizationInput
-                    ? _runSummarization
-                    : null,
-                icon: _isRunningSummarization
-                    ? const SizedBox.square(
-                        dimension: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.play_arrow),
-                label: Text(
-                  _isRunningSummarization ? 'Summarizing…' : 'Summarize',
-                ),
-              ),
-              const SizedBox(height: 16),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text(
-                        'Status: ${_isRunningSummarization
-                            ? 'Summarizing…'
-                            : _summarizationError != null
-                            ? 'Error'
-                            : _summarizationOutput.isNotEmpty
-                            ? 'Completed'
-                            : 'Not run'}',
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      if (_summarizationElapsedMilliseconds != null) ...[
-                        const SizedBox(height: 8),
-                        Text(
-                          'Processing time: '
-                          '${_formatElapsedTime(_summarizationElapsedMilliseconds!)}',
-                        ),
-                      ],
-                      if (_submittedSummarizationInput != null) ...[
-                        const SizedBox(height: 16),
-                        const Text(
-                          'Exact input sent:',
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 8),
-                        SelectableText(_submittedSummarizationInput!),
-                      ],
-                      const SizedBox(height: 16),
-                      const Text(
-                        'Output:',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 8),
-                      SelectableText(
-                        _summarizationOutput.isEmpty
-                            ? 'The summary will appear here.'
-                            : _summarizationOutput,
-                      ),
-                      if (_summarizationError != null) ...[
-                        const SizedBox(height: 16),
-                        SelectableText(
-                          _summarizationError!,
-                          style: TextStyle(color: colors.error),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
+              SummarizationExperiment(
+                controller: _summarizationFeature,
+                presentation: SummarizationPresentation.technical,
+                sectionKey: _summarizationSectionKey,
+                blockStatusActions:
+                    _isRunningPrompt ||
+                    _isStartingDownload ||
+                    _rewritingFeature.isRunning ||
+                    _rewritingFeature.isStartingDownload ||
+                    _proofreadingFeature.isRunning ||
+                    _proofreadingFeature.isStartingDownload ||
+                    _isRunningImageDescription ||
+                    _isStartingImageDescriptionDownload,
+                blockRun:
+                    _isRunningPrompt ||
+                    _rewritingFeature.isRunning ||
+                    _proofreadingFeature.isRunning ||
+                    _isRunningImageDescription,
               ),
               const SizedBox(height: 40),
-              Text(
-                'Dedicated rewriting test',
-                key: _rewritingSectionKey,
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                'Uses the ML Kit Rewriting API with fixed English professional '
-                'output. Official input limit: fewer than 256 tokens.',
-              ),
-              const SizedBox(height: 20),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: rewritingStatusColor.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: rewritingStatusColor),
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 8,
-                          ),
-                          child: Text(
-                            _rewritingStatus,
-                            style: TextStyle(
-                              color: rewritingStatusColor,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      SelectableText(_rewritingDescription),
-                      if (_rewritingError != null) ...[
-                        const SizedBox(height: 16),
-                        SelectableText(
-                          _rewritingError!,
-                          style: TextStyle(color: colors.error),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              FilledButton.icon(
-                onPressed:
-                    _isCheckingRewriting ||
-                        _isStartingRewritingDownload ||
-                        _isRunningRewriting ||
-                        _isRunningPrompt ||
-                        _isRunningSummarization ||
-                        _isStartingDownload ||
-                        _isStartingSummarizationDownload ||
-                        _proofreadingFeature.isRunning ||
-                        _proofreadingFeature.isStartingDownload ||
-                        _isRunningImageDescription ||
-                        _isStartingImageDescriptionDownload
-                    ? null
-                    : _checkRewritingStatus,
-                icon: _isCheckingRewriting
-                    ? const SizedBox.square(
-                        dimension: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.edit_note),
-                label: Text(
-                  _isCheckingRewriting ? 'Checking…' : 'Check rewriting status',
-                ),
-              ),
-              if (_rewritingStatus == 'DOWNLOADABLE') ...[
-                const SizedBox(height: 12),
-                FilledButton.tonalIcon(
-                  onPressed:
-                      _isStartingRewritingDownload ||
-                          _isStartingDownload ||
-                          _isStartingSummarizationDownload ||
-                          _isRunningPrompt ||
-                          _isRunningSummarization ||
-                          _isRunningRewriting ||
-                          _proofreadingFeature.isStartingDownload ||
-                          _proofreadingFeature.isRunning ||
-                          _isStartingImageDescriptionDownload ||
-                          _isRunningImageDescription
-                      ? null
-                      : _startRewritingDownload,
-                  icon: _isStartingRewritingDownload
-                      ? const SizedBox.square(
-                          dimension: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.download),
-                  label: Text(
-                    _isStartingRewritingDownload
-                        ? 'Starting download…'
-                        : 'Download rewriting assets',
-                  ),
-                ),
-              ],
-              if (_rewritingDownloadMessage != null) ...[
-                const SizedBox(height: 16),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(20),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        LinearProgressIndicator(value: rewritingProgress),
-                        const SizedBox(height: 12),
-                        Text(_rewritingDownloadMessage!),
-                        if (_rewritingDownloadedBytes != null) ...[
-                          const SizedBox(height: 8),
-                          Text(
-                            _rewritingTotalBytes != null &&
-                                    _rewritingTotalBytes! > 0
-                                ? '${_formatBytes(_rewritingDownloadedBytes!)} of '
-                                      '${_formatBytes(_rewritingTotalBytes!)}'
-                                : _formatBytes(_rewritingDownloadedBytes!),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-              const SizedBox(height: 24),
-              const Text('Text to rewrite:'),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _rewritingController,
-                enabled: !_isRunningRewriting,
-                minLines: 4,
-                maxLines: 8,
-                onChanged: (_) => setState(() {}),
-                decoration: InputDecoration(
-                  border: const OutlineInputBorder(),
-                  helperText:
-                      '${_rewritingController.text.length} characters · keep under 256 tokens',
-                ),
-              ),
-              const SizedBox(height: 16),
-              FilledButton.icon(
-                onPressed:
-                    _rewritingStatus == 'AVAILABLE' &&
-                        !_isRunningRewriting &&
-                        !_isRunningPrompt &&
-                        !_isRunningSummarization &&
-                        !_proofreadingFeature.isRunning &&
-                        !_isRunningImageDescription &&
-                        hasValidRewritingInput
-                    ? _runRewriting
-                    : null,
-                icon: _isRunningRewriting
-                    ? const SizedBox.square(
-                        dimension: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.play_arrow),
-                label: Text(
-                  _isRunningRewriting ? 'Rewriting…' : 'Rewrite professionally',
-                ),
-              ),
-              const SizedBox(height: 16),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text(
-                        'Status: ${_isRunningRewriting
-                            ? 'Rewriting…'
-                            : _rewritingError != null
-                            ? 'Error'
-                            : _rewritingOutput.isNotEmpty
-                            ? 'Completed'
-                            : 'Not run'}',
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      if (_rewritingElapsedMilliseconds != null) ...[
-                        const SizedBox(height: 8),
-                        Text(
-                          'Processing time: '
-                          '${_formatElapsedTime(_rewritingElapsedMilliseconds!)}',
-                        ),
-                      ],
-                      if (_rewritingSuggestionCount != null) ...[
-                        const SizedBox(height: 8),
-                        Text(
-                          'Suggestions returned: $_rewritingSuggestionCount '
-                          '(showing highest confidence)',
-                        ),
-                      ],
-                      if (_submittedRewritingInput != null) ...[
-                        const SizedBox(height: 16),
-                        const Text(
-                          'Exact input sent:',
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 8),
-                        SelectableText(_submittedRewritingInput!),
-                      ],
-                      const SizedBox(height: 16),
-                      const Text(
-                        'Output:',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 8),
-                      SelectableText(
-                        _rewritingOutput.isEmpty
-                            ? 'The professional rewrite will appear here.'
-                            : _rewritingOutput,
-                      ),
-                      if (_rewritingError != null) ...[
-                        const SizedBox(height: 16),
-                        SelectableText(
-                          _rewritingError!,
-                          style: TextStyle(color: colors.error),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
+              RewritingExperiment(
+                controller: _rewritingFeature,
+                presentation: RewritingPresentation.technical,
+                sectionKey: _rewritingSectionKey,
+                blockStatusActions:
+                    _isRunningPrompt ||
+                    _isStartingDownload ||
+                    _summarizationFeature.isRunning ||
+                    _summarizationFeature.isStartingDownload ||
+                    _proofreadingFeature.isRunning ||
+                    _proofreadingFeature.isStartingDownload ||
+                    _isRunningImageDescription ||
+                    _isStartingImageDescriptionDownload,
+                blockRun:
+                    _isRunningPrompt ||
+                    _summarizationFeature.isRunning ||
+                    _proofreadingFeature.isRunning ||
+                    _isRunningImageDescription,
               ),
               const SizedBox(height: 40),
               ProofreadingExperiment(
@@ -4532,17 +3399,17 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
                 sectionKey: _proofreadingSectionKey,
                 blockStatusActions:
                     _isRunningPrompt ||
-                    _isRunningSummarization ||
-                    _isRunningRewriting ||
+                    _summarizationFeature.isRunning ||
+                    _rewritingFeature.isRunning ||
                     _isStartingDownload ||
-                    _isStartingSummarizationDownload ||
-                    _isStartingRewritingDownload ||
+                    _summarizationFeature.isStartingDownload ||
+                    _rewritingFeature.isStartingDownload ||
                     _isRunningImageDescription ||
                     _isStartingImageDescriptionDownload,
                 blockRun:
                     _isRunningPrompt ||
-                    _isRunningSummarization ||
-                    _isRunningRewriting ||
+                    _summarizationFeature.isRunning ||
+                    _rewritingFeature.isRunning ||
                     _isRunningImageDescription,
               ),
               const SizedBox(height: 40),
@@ -4608,12 +3475,12 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
                         _isStartingImageDescriptionDownload ||
                         _isRunningImageDescription ||
                         _isRunningPrompt ||
-                        _isRunningSummarization ||
-                        _isRunningRewriting ||
+                        _summarizationFeature.isRunning ||
+                        _rewritingFeature.isRunning ||
                         _proofreadingFeature.isRunning ||
                         _isStartingDownload ||
-                        _isStartingSummarizationDownload ||
-                        _isStartingRewritingDownload ||
+                        _summarizationFeature.isStartingDownload ||
+                        _rewritingFeature.isStartingDownload ||
                         _proofreadingFeature.isStartingDownload
                     ? null
                     : _checkImageDescriptionStatus,
@@ -4635,12 +3502,12 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
                   onPressed:
                       _isStartingImageDescriptionDownload ||
                           _isStartingDownload ||
-                          _isStartingSummarizationDownload ||
-                          _isStartingRewritingDownload ||
+                          _summarizationFeature.isStartingDownload ||
+                          _rewritingFeature.isStartingDownload ||
                           _proofreadingFeature.isStartingDownload ||
                           _isRunningPrompt ||
-                          _isRunningSummarization ||
-                          _isRunningRewriting ||
+                          _summarizationFeature.isRunning ||
+                          _rewritingFeature.isRunning ||
                           _proofreadingFeature.isRunning ||
                           _isRunningImageDescription
                       ? null
@@ -4761,8 +3628,8 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
                         !_isLoadingImageDescriptionTestImage &&
                         !_isRunningImageDescription &&
                         !_isRunningPrompt &&
-                        !_isRunningSummarization &&
-                        !_isRunningRewriting &&
+                        !_summarizationFeature.isRunning &&
+                        !_rewritingFeature.isRunning &&
                         !_proofreadingFeature.isRunning
                     ? _runImageDescription
                     : null,
