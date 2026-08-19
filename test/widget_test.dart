@@ -20,8 +20,12 @@ void main() {
   ) async {
     await tester.pumpWidget(const NanoLabApp());
 
-    await tester.tap(find.byKey(const Key('technical_lab_card')));
+    final technicalLabCard = find.byKey(const Key('technical_lab_card'));
+    await tester.ensureVisible(technicalLabCard);
     await tester.pumpAndSettle();
+    await tester.tap(technicalLabCard);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
 
     expect(find.text('Technical Lab'), findsOneWidget);
     expect(find.text('Gemini Nano status'), findsOneWidget);
