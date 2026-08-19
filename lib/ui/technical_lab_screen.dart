@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../services/nano_native_service.dart';
 import 'nano_lab_section.dart';
 
 class TechnicalLabScreen extends StatefulWidget {
@@ -10,10 +11,12 @@ class TechnicalLabScreen extends StatefulWidget {
     super.key,
     this.initialSection,
     this.everydayMode = false,
+    this.nativeService = const NanoNativeService(),
   });
 
   final NanoLabSection? initialSection;
   final bool everydayMode;
+  final NanoNativeService nativeService;
 
   @override
   State<TechnicalLabScreen> createState() => _TechnicalLabScreenState();
@@ -67,41 +70,7 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
   final GlobalKey _imageDescriptionSectionKey = GlobalKey();
   final GlobalKey _speechRecognitionSectionKey = GlobalKey();
 
-  static const _nativeChannel = MethodChannel(
-    'com.mycarejournals.nano_lab/native',
-  );
-
-  static const _downloadChannel = EventChannel(
-    'com.mycarejournals.nano_lab/download_events',
-  );
-
-  static const _promptChannel = EventChannel(
-    'com.mycarejournals.nano_lab/prompt_events',
-  );
-
-  static const _summarizationDownloadChannel = EventChannel(
-    'com.mycarejournals.nano_lab/summarization_download_events',
-  );
-
-  static const _rewritingDownloadChannel = EventChannel(
-    'com.mycarejournals.nano_lab/rewriting_download_events',
-  );
-
-  static const _proofreadingDownloadChannel = EventChannel(
-    'com.mycarejournals.nano_lab/proofreading_download_events',
-  );
-
-  static const _imageDescriptionDownloadChannel = EventChannel(
-    'com.mycarejournals.nano_lab/image_description_download_events',
-  );
-
-  static const _speechRecognitionDownloadChannel = EventChannel(
-    'com.mycarejournals.nano_lab/speech_recognition_download_events',
-  );
-
-  static const _speechRecognitionChannel = EventChannel(
-    'com.mycarejournals.nano_lab/speech_recognition_events',
-  );
+  late final NanoNativeService _nativeService;
 
   static const _syntheticImageDescriptionTestImageId =
       'synthetic_house_scene_v1';
@@ -308,6 +277,8 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
   void initState() {
     super.initState();
 
+    _nativeService = widget.nativeService;
+
     _promptController = TextEditingController(text: _defaultPrompt);
     _systemInstructionController = TextEditingController(
       text: _defaultSystemInstruction,
@@ -324,53 +295,51 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
       text: _defaultProofreadingText,
     );
 
-    _downloadSubscription = _downloadChannel.receiveBroadcastStream().listen(
+    _downloadSubscription = _nativeService.promptDownloadEvents.listen(
       _handleDownloadEvent,
       onError: _handleDownloadStreamError,
     );
 
-    _promptSubscription = _promptChannel.receiveBroadcastStream().listen(
+    _promptSubscription = _nativeService.promptEvents.listen(
       _handlePromptEvent,
       onError: _handlePromptStreamError,
     );
 
-    _summarizationDownloadSubscription = _summarizationDownloadChannel
-        .receiveBroadcastStream()
+    _summarizationDownloadSubscription = _nativeService
+        .summarizationDownloadEvents
         .listen(
           _handleSummarizationDownloadEvent,
           onError: _handleSummarizationDownloadStreamError,
         );
 
-    _rewritingDownloadSubscription = _rewritingDownloadChannel
-        .receiveBroadcastStream()
+    _rewritingDownloadSubscription = _nativeService.rewritingDownloadEvents
         .listen(
           _handleRewritingDownloadEvent,
           onError: _handleRewritingDownloadStreamError,
         );
 
-    _proofreadingDownloadSubscription = _proofreadingDownloadChannel
-        .receiveBroadcastStream()
+    _proofreadingDownloadSubscription = _nativeService
+        .proofreadingDownloadEvents
         .listen(
           _handleProofreadingDownloadEvent,
           onError: _handleProofreadingDownloadStreamError,
         );
 
-    _imageDescriptionDownloadSubscription = _imageDescriptionDownloadChannel
-        .receiveBroadcastStream()
+    _imageDescriptionDownloadSubscription = _nativeService
+        .imageDescriptionDownloadEvents
         .listen(
           _handleImageDescriptionDownloadEvent,
           onError: _handleImageDescriptionDownloadStreamError,
         );
 
-    _speechRecognitionDownloadSubscription = _speechRecognitionDownloadChannel
-        .receiveBroadcastStream()
+    _speechRecognitionDownloadSubscription = _nativeService
+        .speechRecognitionDownloadEvents
         .listen(
           _handleSpeechRecognitionDownloadEvent,
           onError: _handleSpeechRecognitionDownloadStreamError,
         );
 
-    _speechRecognitionSubscription = _speechRecognitionChannel
-        .receiveBroadcastStream()
+    _speechRecognitionSubscription = _nativeService.speechRecognitionEvents
         .listen(
           _handleSpeechRecognitionEvent,
           onError: _handleSpeechRecognitionStreamError,
@@ -427,9 +396,7 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
     });
 
     try {
-      final result = await _nativeChannel.invokeMapMethod<String, dynamic>(
-        'getPromptStatus',
-      );
+      final result = await _nativeService.getPromptStatus();
 
       if (!mounted) {
         return;
@@ -499,10 +466,7 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
     });
 
     try {
-      final result = await _nativeChannel.invokeMapMethod<String, dynamic>(
-        'setModelReleaseStage',
-        <String, dynamic>{'modelReleaseStage': releaseStage},
-      );
+      final result = await _nativeService.setModelReleaseStage(releaseStage);
 
       if (!mounted) {
         return;
@@ -532,9 +496,7 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
 
   Future<void> _checkSystemInstructionStatus() async {
     try {
-      final result = await _nativeChannel.invokeMapMethod<String, dynamic>(
-        'getSystemInstructionStatus',
-      );
+      final result = await _nativeService.getSystemInstructionStatus();
 
       if (!mounted) {
         return;
@@ -589,7 +551,7 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
     });
 
     try {
-      await _nativeChannel.invokeMethod<dynamic>('startPromptDownload');
+      await _nativeService.startPromptDownload();
 
       if (!mounted) {
         return;
@@ -638,9 +600,7 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
     });
 
     try {
-      final result = await _nativeChannel.invokeMapMethod<String, dynamic>(
-        'getSummarizationStatus',
-      );
+      final result = await _nativeService.getSummarizationStatus();
 
       if (!mounted) {
         return;
@@ -703,7 +663,7 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
     });
 
     try {
-      await _nativeChannel.invokeMethod<dynamic>('startSummarizationDownload');
+      await _nativeService.startSummarizationDownload();
 
       if (!mounted) {
         return;
@@ -756,10 +716,7 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
     });
 
     try {
-      final result = await _nativeChannel.invokeMapMethod<String, dynamic>(
-        'runSummarization',
-        <String, dynamic>{'text': input},
-      );
+      final result = await _nativeService.runSummarization(input);
       stopwatch.stop();
 
       if (!mounted) {
@@ -839,9 +796,7 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
     });
 
     try {
-      final result = await _nativeChannel.invokeMapMethod<String, dynamic>(
-        'getRewritingStatus',
-      );
+      final result = await _nativeService.getRewritingStatus();
 
       if (!mounted) {
         return;
@@ -902,7 +857,7 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
     });
 
     try {
-      await _nativeChannel.invokeMethod<dynamic>('startRewritingDownload');
+      await _nativeService.startRewritingDownload();
 
       if (!mounted) {
         return;
@@ -956,10 +911,7 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
     });
 
     try {
-      final result = await _nativeChannel.invokeMapMethod<String, dynamic>(
-        'runRewriting',
-        <String, dynamic>{'text': input},
-      );
+      final result = await _nativeService.runRewriting(input);
       stopwatch.stop();
 
       if (!mounted) {
@@ -1040,9 +992,7 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
     });
 
     try {
-      final result = await _nativeChannel.invokeMapMethod<String, dynamic>(
-        'getProofreadingStatus',
-      );
+      final result = await _nativeService.getProofreadingStatus();
 
       if (!mounted) {
         return;
@@ -1105,7 +1055,7 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
     });
 
     try {
-      await _nativeChannel.invokeMethod<dynamic>('startProofreadingDownload');
+      await _nativeService.startProofreadingDownload();
 
       if (!mounted) {
         return;
@@ -1159,10 +1109,7 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
     });
 
     try {
-      final result = await _nativeChannel.invokeMapMethod<String, dynamic>(
-        'runProofreading',
-        <String, dynamic>{'text': input},
-      );
+      final result = await _nativeService.runProofreading(input);
       stopwatch.stop();
 
       if (!mounted) {
@@ -1246,9 +1193,8 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
     });
 
     try {
-      final result = await _nativeChannel.invokeMapMethod<String, dynamic>(
-        'getImageDescriptionTestImage',
-        <String, dynamic>{'imageId': requestedImageId},
+      final result = await _nativeService.getImageDescriptionTestImage(
+        requestedImageId,
       );
 
       if (!mounted) {
@@ -1327,9 +1273,7 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
     });
 
     try {
-      final result = await _nativeChannel.invokeMapMethod<String, dynamic>(
-        'getImageDescriptionStatus',
-      );
+      final result = await _nativeService.getImageDescriptionStatus();
 
       if (!mounted) {
         return;
@@ -1392,9 +1336,7 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
     });
 
     try {
-      await _nativeChannel.invokeMethod<dynamic>(
-        'startImageDescriptionDownload',
-      );
+      await _nativeService.startImageDescriptionDownload();
 
       if (!mounted) {
         return;
@@ -1446,9 +1388,8 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
     });
 
     try {
-      final result = await _nativeChannel.invokeMapMethod<String, dynamic>(
-        'runImageDescription',
-        <String, dynamic>{'imageId': _selectedImageDescriptionTestImageId},
+      final result = await _nativeService.runImageDescription(
+        _selectedImageDescriptionTestImageId,
       );
       stopwatch.stop();
 
@@ -1534,9 +1475,7 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
     });
 
     try {
-      final result = await _nativeChannel.invokeMapMethod<String, dynamic>(
-        'getSpeechRecognitionStatus',
-      );
+      final result = await _nativeService.getSpeechRecognitionStatus();
 
       if (!mounted) {
         return;
@@ -1599,9 +1538,7 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
     });
 
     try {
-      await _nativeChannel.invokeMethod<dynamic>(
-        'startSpeechRecognitionDownload',
-      );
+      await _nativeService.startSpeechRecognitionDownload();
 
       if (!mounted) {
         return;
@@ -1653,10 +1590,8 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
     });
 
     try {
-      final permissionResult = await _nativeChannel
-          .invokeMapMethod<String, dynamic>(
-            'requestSpeechRecognitionPermission',
-          );
+      final permissionResult = await _nativeService
+          .requestSpeechRecognitionPermission();
 
       if (!mounted) {
         return;
@@ -1676,7 +1611,7 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
         _speechRecognitionSessionStatus = 'Starting microphone…';
       });
 
-      await _nativeChannel.invokeMethod<dynamic>('startSpeechRecognition');
+      await _nativeService.startSpeechRecognition();
     } on PlatformException catch (error) {
       if (!mounted) {
         return;
@@ -1717,7 +1652,7 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
     });
 
     try {
-      await _nativeChannel.invokeMethod<dynamic>('stopSpeechRecognition');
+      await _nativeService.stopSpeechRecognition();
     } on PlatformException catch (error) {
       if (!mounted) {
         return;
@@ -1847,17 +1782,16 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
     });
 
     try {
-      final tokenResult = await _nativeChannel
-          .invokeMapMethod<String, dynamic>('getTokenInfo', <String, dynamic>{
-            'prompt': prompt,
-            'systemInstruction': systemInstruction,
-            'temperature': temperature,
-            'maxOutputTokens': maxOutputTokens,
-            'seed': seed,
-            'topK': topK,
-            'candidateCount': candidateCount,
-            'modelReleaseStage': _modelReleaseStage,
-          });
+      final tokenResult = await _nativeService.getTokenInfo(<String, dynamic>{
+        'prompt': prompt,
+        'systemInstruction': systemInstruction,
+        'temperature': temperature,
+        'maxOutputTokens': maxOutputTokens,
+        'seed': seed,
+        'topK': topK,
+        'candidateCount': candidateCount,
+        'modelReleaseStage': _modelReleaseStage,
+      });
 
       if (!mounted) {
         return false;
@@ -1924,17 +1858,16 @@ class _TechnicalLabScreenState extends State<TechnicalLabScreen> {
         _nextRunNumber++;
       });
 
-      final result = await _nativeChannel
-          .invokeMapMethod<String, dynamic>('runPrompt', <String, dynamic>{
-            'prompt': prompt,
-            'systemInstruction': systemInstruction,
-            'temperature': temperature,
-            'maxOutputTokens': maxOutputTokens,
-            'seed': seed,
-            'topK': topK,
-            'candidateCount': candidateCount,
-            'modelReleaseStage': _modelReleaseStage,
-          });
+      final result = await _nativeService.runPrompt(<String, dynamic>{
+        'prompt': prompt,
+        'systemInstruction': systemInstruction,
+        'temperature': temperature,
+        'maxOutputTokens': maxOutputTokens,
+        'seed': seed,
+        'topK': topK,
+        'candidateCount': candidateCount,
+        'modelReleaseStage': _modelReleaseStage,
+      });
 
       if (!mounted) {
         return false;
