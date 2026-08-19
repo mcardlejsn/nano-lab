@@ -1,13 +1,29 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nano_lab/main.dart';
 
 void main() {
-  testWidgets('Nano Lab displays the Gemini Nano status screen', (
+  testWidgets('Nano Lab displays the new exploration home', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(const NanoLabApp());
 
     expect(find.text('Nano Lab'), findsOneWidget);
+    expect(find.text('Explore Gemini Nano on your phone'), findsOneWidget);
+    expect(find.text('Everyday Usefulness'), findsOneWidget);
+    expect(find.text('Technical Lab'), findsOneWidget);
+    expect(find.text('Device Report Card'), findsOneWidget);
+  });
+
+  testWidgets('Technical Lab preserves the existing test harness', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(const NanoLabApp());
+
+    await tester.tap(find.byKey(const Key('technical_lab_card')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Technical Lab'), findsOneWidget);
     expect(find.text('Gemini Nano status'), findsOneWidget);
     expect(find.text('NOT CHECKED'), findsWidgets);
     expect(find.text('Check Gemini Nano status'), findsOneWidget);

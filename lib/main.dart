@@ -19,16 +19,18 @@ class NanoLabApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
       ),
-      home: const NanoStatusScreen(),
+      home: const NanoLabHomeScreen(),
     );
   }
 }
 
-class NanoStatusScreen extends StatefulWidget {
-  const NanoStatusScreen({super.key});
+class _NanoStatusScreen extends StatefulWidget {
+  const _NanoStatusScreen({this.initialSection});
+
+  final _NanoLabSection? initialSection;
 
   @override
-  State<NanoStatusScreen> createState() => _NanoStatusScreenState();
+  State<_NanoStatusScreen> createState() => _NanoStatusScreenState();
 }
 
 enum _NanoLabSection {
@@ -39,6 +41,579 @@ enum _NanoLabSection {
   proofreading,
   imageDescription,
   speechRecognition,
+}
+
+class NanoLabHomeScreen extends StatelessWidget {
+  const NanoLabHomeScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Nano Lab')),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      colors.primaryContainer,
+                      colors.tertiaryContainer,
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(28),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      Icons.psychology_alt_outlined,
+                      size: 42,
+                      color: colors.onPrimaryContainer,
+                    ),
+                    const SizedBox(height: 18),
+                    Text(
+                      'Explore Gemini Nano on your phone',
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: colors.onPrimaryContainer,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      'See what on-device AI is useful for, examine the '
+                      'technical details, or review the measured results.',
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        color: colors.onPrimaryContainer,
+                        height: 1.4,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 28),
+              Text(
+                'Choose how you want to explore',
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 14),
+              _NanoLabPathCard(
+                key: const Key('everyday_usefulness_card'),
+                icon: Icons.auto_awesome_outlined,
+                title: 'Everyday Usefulness',
+                description:
+                    'Try practical tasks such as proofreading, rewriting, '
+                    'summarizing, image description, and speech recognition.',
+                accent: colors.primary,
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const EverydayUsefulnessScreen(),
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: 14),
+              _NanoLabPathCard(
+                key: const Key('technical_lab_card'),
+                icon: Icons.science_outlined,
+                title: 'Technical Lab',
+                description:
+                    'Use generation controls, inspect feature availability, '
+                    'repeat fixed tests, and examine detailed timings.',
+                accent: colors.tertiary,
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const _NanoStatusScreen(),
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: 14),
+              _NanoLabPathCard(
+                key: const Key('device_report_card'),
+                icon: Icons.fact_check_outlined,
+                title: 'Device Report Card',
+                description:
+                    'Read the plain-language Pixel 10 Pro results, including '
+                    'strengths, limitations, speed, and offline operation.',
+                accent: Colors.teal,
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const DeviceReportCardScreen(),
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: 24),
+              Card(
+                color: colors.surfaceContainerLow,
+                child: const Padding(
+                  padding: EdgeInsets.all(18),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.lock_outline),
+                      SizedBox(width: 14),
+                      Expanded(
+                        child: Text(
+                          'Nano Lab uses on-device ML Kit GenAI APIs. After '
+                          'required assets are installed, the tested '
+                          'capabilities can run without an internet connection.',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _NanoLabPathCard extends StatelessWidget {
+  const _NanoLabPathCard({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.description,
+    required this.accent,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String description;
+  final Color accent;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                width: 54,
+                height: 54,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Icon(icon, color: accent, size: 30),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(description, style: const TextStyle(height: 1.35)),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Icon(Icons.chevron_right),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _EverydayTest {
+  const _EverydayTest({
+    required this.icon,
+    required this.title,
+    required this.question,
+    required this.section,
+    required this.accent,
+  });
+
+  final IconData icon;
+  final String title;
+  final String question;
+  final _NanoLabSection section;
+  final Color accent;
+}
+
+class EverydayUsefulnessScreen extends StatelessWidget {
+  const EverydayUsefulnessScreen({super.key});
+
+  static const _tests = <_EverydayTest>[
+    _EverydayTest(
+      icon: Icons.spellcheck,
+      title: 'Fix my writing',
+      question: 'Can it correct mistakes without changing the facts?',
+      section: _NanoLabSection.proofreading,
+      accent: Colors.green,
+    ),
+    _EverydayTest(
+      icon: Icons.edit_note,
+      title: 'Rewrite a message',
+      question: 'Can it make a message sound more professional?',
+      section: _NanoLabSection.rewriting,
+      accent: Colors.blue,
+    ),
+    _EverydayTest(
+      icon: Icons.summarize,
+      title: 'Summarize something',
+      question: 'Can it shorten a long article without losing the point?',
+      section: _NanoLabSection.summarization,
+      accent: Colors.orange,
+    ),
+    _EverydayTest(
+      icon: Icons.sort,
+      title: 'Organize information',
+      question: 'Can it sort and extract details while preserving every fact?',
+      section: _NanoLabSection.prompt,
+      accent: Colors.deepPurple,
+    ),
+    _EverydayTest(
+      icon: Icons.image_search,
+      title: 'Understand a picture',
+      question: 'What does it recognize, miss, or confidently misidentify?',
+      section: _NanoLabSection.imageDescription,
+      accent: Colors.pink,
+    ),
+    _EverydayTest(
+      icon: Icons.mic_none,
+      title: 'Transcribe speech',
+      question: 'Can it preserve the meaning of an ordinary spoken note?',
+      section: _NanoLabSection.speechRecognition,
+      accent: Colors.red,
+    ),
+    _EverydayTest(
+      icon: Icons.offline_bolt_outlined,
+      title: 'Check offline readiness',
+      question: 'Are Gemini Nano and the required feature assets available?',
+      section: _NanoLabSection.status,
+      accent: Colors.teal,
+    ),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Everyday Usefulness')),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+          children: [
+            Text(
+              'What can Gemini Nano actually help with?',
+              style: theme.textTheme.headlineSmall?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'Choose a practical question. Nano Lab will open the matching '
+              'controlled test so you can inspect the exact input, output, '
+              'timing, and limitations.',
+              style: theme.textTheme.bodyLarge?.copyWith(height: 1.45),
+            ),
+            const SizedBox(height: 22),
+            ..._tests.map(
+              (test) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Card(
+                  clipBehavior: Clip.antiAlias,
+                  child: InkWell(
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => _NanoStatusScreen(
+                            initialSection: test.section,
+                          ),
+                        ),
+                      );
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.all(18),
+                      child: Row(
+                        children: [
+                          CircleAvatar(
+                            backgroundColor: test.accent.withValues(alpha: 0.12),
+                            foregroundColor: test.accent,
+                            child: Icon(test.icon),
+                          ),
+                          const SizedBox(width: 15),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  test.title,
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const SizedBox(height: 5),
+                                Text(test.question),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Icon(Icons.chevron_right, color: colors.outline),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Card(
+              color: colors.secondaryContainer,
+              child: Padding(
+                padding: const EdgeInsets.all(18),
+                child: Text(
+                  'These are controlled demonstrations, not guarantees. '
+                  'Review generated results before using them, especially '
+                  'when an error or omission could matter.',
+                  style: TextStyle(
+                    color: colors.onSecondaryContainer,
+                    height: 1.4,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ReportCardEntry {
+  const _ReportCardEntry({
+    required this.capability,
+    required this.rating,
+    required this.conclusion,
+    required this.color,
+  });
+
+  final String capability;
+  final String rating;
+  final String conclusion;
+  final Color color;
+}
+
+class DeviceReportCardScreen extends StatelessWidget {
+  const DeviceReportCardScreen({super.key});
+
+  static const _entries = <_ReportCardEntry>[
+    _ReportCardEntry(
+      capability: 'Proofreading',
+      rating: 'Strong',
+      conclusion:
+          'Corrected every planted error, preserved all facts, and averaged about one second.',
+      color: Colors.green,
+    ),
+    _ReportCardEntry(
+      capability: 'Rewriting',
+      rating: 'Useful with review',
+      conclusion:
+          'Preserved the supplied facts, but added an unrequested sign-off and name placeholder.',
+      color: Colors.blue,
+    ),
+    _ReportCardEntry(
+      capability: 'Summarization',
+      rating: 'Mixed',
+      conclusion:
+          'Fast and factually sound, but consistently omitted the article\'s central results.',
+      color: Colors.orange,
+    ),
+    _ReportCardEntry(
+      capability: 'Information organization',
+      rating: 'Strong in tested task',
+      conclusion:
+          'Sorted five dated records correctly and preserved every fact across three runs.',
+      color: Colors.green,
+    ),
+    _ReportCardEntry(
+      capability: 'Structured extraction',
+      rating: 'Useful with validation',
+      conclusion:
+          'Extracted the correct fields, but ignored the requested undecorated JSON format.',
+      color: Colors.deepPurple,
+    ),
+    _ReportCardEntry(
+      capability: 'Image description',
+      rating: 'Mixed',
+      conclusion:
+          'Understood the main scenes, but omitted a prominent tree and misidentified a charging stand.',
+      color: Colors.orange,
+    ),
+    _ReportCardEntry(
+      capability: 'Speech recognition',
+      rating: 'Strong with review',
+      conclusion:
+          'Usually preserved the complete meaning, with occasional meaningful word substitutions.',
+      color: Colors.blue,
+    ),
+    _ReportCardEntry(
+      capability: 'Offline operation',
+      rating: 'Confirmed',
+      conclusion:
+          'All six tested capabilities completed after restarting Nano Lab fully offline.',
+      color: Colors.teal,
+    ),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Device Report Card')),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+          children: [
+            Text(
+              'Pixel 10 Pro',
+              style: theme.textTheme.headlineMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Gemini Nano on-device evaluation · August 2026',
+              style: theme.textTheme.bodyLarge?.copyWith(
+                color: colors.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 18),
+            Card(
+              color: colors.primaryContainer,
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Overall conclusion',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        color: colors.onPrimaryContainer,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Useful for narrow, private, reversible assistance when '
+                      'a person can review the result. Repeatability did not '
+                      'guarantee correctness or completeness.',
+                      style: TextStyle(
+                        color: colors.onPrimaryContainer,
+                        height: 1.45,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 18),
+            ..._entries.map(
+              (entry) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(18),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                entry.capability,
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: entry.color.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(color: entry.color),
+                              ),
+                              child: Text(
+                                entry.rating,
+                                style: TextStyle(
+                                  color: entry.color,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        Text(entry.conclusion, style: const TextStyle(height: 1.4)),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Card(
+              color: colors.surfaceContainerLow,
+              child: const Padding(
+                padding: EdgeInsets.all(18),
+                child: Text(
+                  'Ratings describe the fixed tests performed on one stock '
+                  'Pixel 10 Pro. They are not universal grades for every '
+                  'prompt, image, speaker, device, or future model version.',
+                  style: TextStyle(height: 1.4),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _PromptRun {
@@ -80,7 +655,7 @@ class _PromptRun {
   String? rating;
 }
 
-class _NanoStatusScreenState extends State<NanoStatusScreen> {
+class _NanoStatusScreenState extends State<_NanoStatusScreen> {
   final GlobalKey _statusSectionKey = GlobalKey();
   final GlobalKey _promptSectionKey = GlobalKey();
   final GlobalKey _summarizationSectionKey = GlobalKey();
@@ -399,6 +974,15 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
         );
 
     _loadImageDescriptionTestImage();
+
+    final initialSection = widget.initialSection;
+    if (initialSection != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _jumpToSection(initialSection);
+        }
+      });
+    }
   }
 
   @override
@@ -3067,7 +3651,7 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Nano Lab'),
+        title: const Text('Technical Lab'),
         actions: [
           PopupMenuButton<_NanoLabSection>(
             tooltip: 'Jump to test',
@@ -4962,3 +5546,4 @@ class _NanoStatusScreenState extends State<NanoStatusScreen> {
     );
   }
 }
+
