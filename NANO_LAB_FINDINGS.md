@@ -1,6 +1,6 @@
 # Nano Lab: Gemini Nano On-Device Evaluation
 
-**Pixel 10 Pro findings — August 16, 2026**  
+**Pixel 10 Pro findings — updated August 19, 2026**  
 **Author:** Jason McArdle  
 **Project:** [Nano Lab](https://github.com/mcardlejsn/nano-lab)
 
@@ -13,6 +13,10 @@ Nano Lab is an Android-only Flutter experiment built to answer one central quest
 On a stock Google Pixel 10 Pro, Gemini Nano was genuinely useful for several narrow, well-defined tasks. It performed especially well at deterministic date sorting, factual extraction, proofreading, professional rewriting, and on-device speech recognition. The dedicated Proofreading API was the strongest result in this evaluation: it corrected every deliberately introduced error, preserved all facts, added nothing, returned identical output across four runs, and averaged approximately one second.
 
 The tests also exposed meaningful limitations. Structured text output included unwanted Markdown fences. Rewriting repeatedly added an unrequested sign-off and name placeholder. The dedicated Summarization API was fast and factually sound but consistently omitted the article's central results. Image Description produced perfectly repeatable wording while omitting a prominent tree in a synthetic scene and misidentifying an empty charging stand as a smartphone in a real photograph. Speech Recognition occasionally made meaningful substitutions.
+
+A controlled Top-K comparison changed only Top-K across values 1, 3, and 10. All three outputs followed the uppercase and three-sentence instructions, but the wording changed and Top-K 3 produced the most visibly different response in this single comparison. The result illustrates that Top-K controls token selection rather than knowledge, quality, or the number of answers.
+
+For qualitative context, the same real tabletop photograph was later submitted separately to Gemini 3.7 Flash in the Gemini web app. Flash correctly distinguished the empty charging stand from a smartphone and explicitly identified the computer mouse. This was an external cloud comparison, not part of Nano Lab's on-device execution or timing measurements.
 
 The most important general lesson is:
 
@@ -40,7 +44,8 @@ This report completes the Pixel 10 Pro portion of Nano Lab. A controlled Pixel 1
 | Native integration | Kotlin bridge through Flutter platform channels |
 | Model platform | Google ML Kit GenAI APIs, Gemini Nano, and AICore |
 | Data used | Fictional text and disposable fixed images |
-| Cloud AI | None |
+| Cloud AI used by Nano Lab | None |
+| External comparison | One separate Gemini 3.7 Flash web-app run; not part of Nano Lab execution |
 | Persistent test history | None |
 
 ### Tested dependencies
@@ -64,6 +69,10 @@ Nano Lab uses fixed, visible inputs so runs can be repeated without changing the
 
 The evaluation intentionally remained focused. It was designed to identify useful behavior and important failure modes rather than exhaustively test every parameter combination. The number of runs varied by capability, with repeated runs used where repeatability was central to the question.
 
+The Top-K comparison held the prompt, system instruction, temperature, seed, maximum output tokens, candidate count, and model stage constant while changing only Top-K. One run was captured per Top-K value, so the comparison demonstrates different observed outputs but does not measure repeatability or a statistical trend at each setting.
+
+The later Gemini 3.7 Flash image test was performed outside Nano Lab in the Gemini web app. It is reported only as a qualitative cloud comparison and is not included in the on-device latency, offline-operation, or permission findings.
+
 Evaluation criteria included:
 
 - Factual accuracy
@@ -81,7 +90,7 @@ The exact fixed test inputs are displayed in the application and represented in 
 
 | Capability | Observed strengths | Important limitations | Typical measured time | Appropriate uses | Inappropriate uses |
 | --- | --- | --- | ---: | --- | --- |
-| Freeform Prompt | Flexible; reliable deterministic sorting and extraction; system instructions supported | Can ignore formatting details; generated JSON required sanitizing | About 4–7 seconds in the formal text tests | Drafting, local transformation, extraction with validation | Blind parsing, autonomous decisions, safety-critical conclusions |
+| Freeform Prompt | Flexible; reliable deterministic sorting and extraction; system instructions supported; Top-K changed output wording | Can ignore formatting details; generated JSON required sanitizing; larger Top-K did not imply better output | About 4–7 seconds in the formal text tests | Drafting, local transformation, extraction with validation | Blind parsing, autonomous decisions, safety-critical conclusions |
 | Summarization | Fast, repeatable, factually sound | Consistently prioritized routine rules over central results | 1.91-second average | Quick generic summaries where omissions are acceptable | Decision support requiring reliable prioritization of key facts |
 | Rewriting | Preserved supplied facts and produced professional wording | Added an unrequested closing and `[Your Name]` placeholder | 5.21-second average | User-reviewed message drafting | Automatic sending or exact-template generation without review |
 | Proofreading | Corrected every planted error; preserved facts; added nothing | Tested on one short controlled sentence | 1.04-second average | Short, user-reviewed grammar and spelling correction | Assuming every possible correction will be perfect |
@@ -143,10 +152,61 @@ Observed finish reasons included `STOP (0)` and `MAX_TOKENS (1)`.
 - Temperature `1.0` produced more varied but coherent wording.
 - A fixed seed of `123` at temperature `1.0` produced identical output twice.
 - Seed `0` was used for varying runs.
-- Changing Top-K affected wording as expected.
+- A controlled Top-K comparison changed wording while all other recorded settings remained fixed.
 - Multiple candidates produced distinct responses.
 
 These controls changed how Nano selected and expressed an answer; they did not give the model additional knowledge.
+
+#### Controlled Top-K comparison
+
+The comparison used the same request three times while changing only Top-K.
+
+Configuration:
+
+```text
+Model stage: Stable
+System instruction: Respond using uppercase letters only.
+Prompt: Write exactly three short sentences about a fictional robot learning to garden.
+Temperature: 0.7
+Maximum output tokens: 4096
+Seed: 123
+Candidate count: 1
+Request tokens: 32
+Top-K values: 1, 3, and 10
+```
+
+| Run | Top-K | Time | Finish reason |
+| --- | ---: | ---: | --- |
+| 1 | 1 | 5.86 seconds | `STOP (0)` |
+| 2 | 3 | 5.80 seconds | `STOP (0)` |
+| 3 | 10 | 5.51 seconds | `STOP (0)` |
+| **Average** | — | **Approximately 5.72 seconds** | — |
+
+Top-K 1 output:
+
+```text
+UNIT 734 ANALYZED SOIL COMPOSITION WITH OPTIMAL EFFICIENCY. IT THEN CAREFULLY PLANTED SEEDS ACCORDING TO PRE-PROGRAMMED PARAMETERS. THE ROBOT NOW MONITORS PLANT GROWTH AND ADJUSTS WATER LEVELS AUTOMATICALLY.
+```
+
+Top-K 3 output:
+
+```text
+UNIT 734 ANALYZED SOIL COMPOSITION AND COMMENCED PLANTING PROCEDURE. ITS OPTICAL SENSORS DETECTED A WILTING ROSE AND IT ADJUSTED WATER FLOW ACCORDINGLY. THE ROBOT THEN DETECTED FRUIT RIPE AND AUTOMATICALLY HARVESTED IT FOR CONSUMPTION.
+```
+
+Top-K 10 output:
+
+```text
+UNIT 734 ANALYZED SOIL COMPOSITION WITH OPTIMAL PRECISION. IT THEN CAREFULLY PLANTED SEEDS ACCORDING TO PRE-PROGRAMMED PARAMETERS. THE ROBOT NOW MONITORS PLANT GROWTH AND ADJUSTS WATER LEVELS FOR MAXIMAL YIELD.
+```
+
+All three responses obeyed the system instruction and returned exactly three sentences. Top-K 1 and Top-K 10 were structurally very similar, while Top-K 3 introduced a wilting rose and fruit harvesting and also contained the awkward phrase “detected fruit ripe.” Processing times were similar across the three runs.
+
+Because only one output was captured at each value, this comparison does not establish repeatability for any Top-K setting or show that visible variation increases monotonically as Top-K rises.
+
+**Finding:**
+
+> Changing only Top-K changed the generated wording and content, but a larger Top-K did not reliably produce a visibly more varied or better response. Top-K controls the eligible next-token pool; it is not a quality, knowledge, or answer-count setting.
 
 #### Deterministic date sorting
 
@@ -343,6 +403,22 @@ The API correctly recognized the bottle, pen, lamp, tabletop, and overall scene.
 
 > Strong repeatability did not guarantee complete or correct object identification. The same confident visual error was reproduced in every run.
 
+#### External Gemini 3.7 Flash comparison
+
+After the on-device evaluation, the same real tabletop photograph was submitted separately to Gemini 3.7 Flash in the Gemini web app with this prompt:
+
+```text
+Please identify everything in this picture
+```
+
+Flash explicitly identified the computer mouse, pen, Cherry Coca-Cola bottle, wireless/MagSafe phone-charging stand, desk lamp, tabletop, and background. Unlike the on-device Image Description result, it correctly recognized that the stand was a charging stand rather than a smartphone and named the mouse instead of reducing it to “a small black object.”
+
+This was a single qualitative cloud comparison. It was not run through Nano Lab, was not an offline test, and was not included in the on-device processing-time measurements. It demonstrates a clear result on this particular photograph but does not establish that Flash will identify every object correctly in every image.
+
+**Comparison finding:**
+
+> On the same tabletop photograph, Gemini 3.7 Flash produced a more complete and accurate inventory than the on-device Image Description API, correctly resolving both of Nano's principal errors. The tradeoff is that Flash processed the image through a cloud service rather than entirely on-device.
+
 ### 7. Advanced GenAI Speech Recognition API
 
 Configuration:
@@ -474,6 +550,7 @@ Within the tested scope, Gemini Nano was strongest at:
 - Professional rewriting when the result remained user-reviewed
 - Fast dedicated inference for proofreading and summarization
 - Repeatable responses under controlled settings
+- Following the uppercase and exact sentence-count instructions throughout the controlled Top-K comparison
 - Useful draft-quality speech transcription
 - Maintaining functionality after assets were installed and the phone was taken offline
 
@@ -532,6 +609,8 @@ For structured tasks, ordinary deterministic code should be used whenever the ta
 - The tested APIs were beta or alpha and may change.
 - The stable Prompt model was tested; the Preview model was unavailable.
 - No attempt was made to test every generation-setting combination.
+- The Top-K comparison used only one run at each value, so it cannot establish per-setting repeatability or a statistical relationship between Top-K and output variation.
+- The Gemini 3.7 Flash comparison used one externally submitted photograph and was qualitative rather than a controlled latency benchmark.
 - No production medical or caregiver data was used.
 
 ## Planned Pixel 11 Pro XL addendum
@@ -573,4 +652,5 @@ The Pixel 10 Pro results support this overall conclusion:
 - [GenAI Image Description API](https://developers.google.com/ml-kit/genai/image-description/android)
 - [GenAI Speech Recognition API](https://developers.google.com/ml-kit/genai/speech-recognition/android)
 - [Android AAPT2 documentation](https://developer.android.com/tools/aapt2)
+
 
